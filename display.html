@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Espéculo(ar) — corpus vivo</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital@0;1&display=swap');
+  
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  
+  body {
+    background: #0a0a0a;
+    color: #e8e8e0;
+    font-family: 'Space Mono', monospace;
+    min-height: 100vh;
+    padding: 2rem;
+  }
+
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 3rem;
+    border-bottom: 0.5px solid #333;
+    padding-bottom: 1.5rem;
+  }
+
+  .titulo { font-size: 13px; letter-spacing: 0.15em; color: #888; }
+  .subtitulo { font-size: 11px; color: #555; margin-top: 4px; font-style: italic; }
+  
+  .contador {
+    text-align: right;
+  }
+  .n-respuestas { font-size: 48px; font-weight: normal; color: #e8e8e0; line-height: 1; }
+  .n-label { font-size: 11px; color: #555; margin-top: 4px; letter-spacing: 0.1em; }
+
+  .clusters {
+    margin-bottom: 3rem;
+  }
+
+  .cluster-fila {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 12px;
+  }
+
+  .cluster-nombre {
+    font-size: 11px;
+    color: #666;
+    width: 160px;
+    flex-shrink: 0;
+    letter-spacing: 0.05em;
+  }
+
+  .cluster-barra-wrap {
+    flex: 1;
+    height: 2px;
+    background: #1a1a1a;
+    position: relative;
+  }
+
+  .cluster-barra {
+    height: 100%;
+    transition: width 1.5s ease;
+  }
+
+  .cluster-n {
+    font-size: 11px;
+    color: #555;
+    width: 24px;
+    text-align: right;
+    flex-shrink: 0;
+  }
+
+  .prompt-section {
+    border-top: 0.5px solid #222;
+    padding-top: 2rem;
+    margin-bottom: 3rem;
+  }
+
+  .prompt-label {
+    font-size: 10px;
+    color: #444;
+    letter-spacing: 0.15em;
+    margin-bottom: 1rem;
+  }
+
+  .prompt-texto {
+    font-size: 13px;
+    color: #aaa;
+    line-height: 1.8;
+    font-style: italic;
+    max-width: 680px;
+  }
+
+  .footer {
+    border-top: 0.5px solid #1a1a1a;
+    padding-top: 1rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .estado-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #2a2a2a;
+    display: inline-block;
+    margin-right: 6px;
+  }
+  .estado-dot.vivo { background: #1D9E75; }
+
+  .update-time { font-size: 10px; color: #333; }
+  .estado-texto { font-size: 10px; color: #444; }
+
+  .cluster-dominante-label {
+    font-size: 10px;
+    color: #444;
+    letter-spacing: 0.1em;
+    margin-bottom: 0.5rem;
+  }
+  .cluster-dominante-valor {
+    font-size: 20px;
+    color: #e8e8e0;
+    margin-bottom: 2rem;
+    letter-spacing: 0.05em;
+  }
+
+  .error-msg {
+    font-size: 12px;
+    color: #555;
+    font-style: italic;
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <div class="titulo">ESPÉCULO(AR)</div>
+    <div class="subtitulo">corpus vivo — aprendizaje incremental sobre embeddings</div>
+  </div>
+  <div class="contador">
+    <div class="n-respuestas" id="n-respuestas">—</div>
+    <div class="n-label">VOCES EN EL CORPUS</div>
+  </div>
+</div>
+
+<div class="cluster-dominante-label">CAMPO SEMÁNTICO DOMINANTE</div>
+<div class="cluster-dominante-valor" id="dominante">—</div>
+
+<div class="clusters" id="clusters-container">
+  <div class="error-msg">conectando con el corpus...</div>
+</div>
+
+<div class="prompt-section">
+  <div class="prompt-label">SÍNTESIS COMPUTACIONAL ACTUAL — PROMPT GENERADO DESDE EL CORPUS</div>
+  <div class="prompt-texto" id="prompt-actual">—</div>
+</div>
+
+<div class="footer">
+  <div>
+    <span class="estado-dot" id="estado-dot"></span>
+    <span class="estado-texto" id="estado-texto">conectando...</span>
+  </div>
+  <div class="update-time" id="update-time"></div>
+</div>
+
+<script>
+const COLORES = {
+  'frio_metal':    '#85B7EB',
+  'calor_deseo':   '#ED93B1',
+  'cuerpo_dolor':  '#F0997B',
+  'invasion':      '#AFA9EC',
+  'morgue_muerte': '#B4B2A9',
+  'intimidad':     '#5DCAA5',
+  'mecanico':      '#EF9F27',
+  'organico':      '#97C459'
+};
+
+const NOMBRES_ES = {
+  'frio_metal':    'frío / metal',
+  'calor_deseo':   'calor / deseo',
+  'cuerpo_dolor':  'cuerpo / dolor',
+  'invasion':      'invasión',
+  'morgue_muerte': 'morgue / muerte',
+  'intimidad':     'intimidad / vínculo',
+  'mecanico':      'mecánico / herramienta',
+  'organico':      'orgánico / carne'
+};
+
+async function actualizar() {
+  try {
+    const res = await fetch('https://especuloar-servidor.onrender.com/estado');
+    const data = await res.json();
+
+    document.getElementById('n-respuestas').textContent = data.total_respuestas;
+    document.getElementById('dominante').textContent = 
+      NOMBRES_ES[data.cluster_dominante] || data.cluster_dominante || '—';
+    document.getElementById('prompt-actual').textContent = 
+      data.prompt_actual || 'corpus insuficiente para síntesis';
+
+    const total = data.clusters.reduce((s, c) => s + c.cantidad, 0) || 1;
+    const container = document.getElementById('clusters-container');
+    
+    if (data.clusters.length === 0) {
+      container.innerHTML = '<div class="error-msg">sin datos aún</div>';
+    } else {
+      const sorted = [...data.clusters].sort((a,b) => b.cantidad - a.cantidad);
+      container.innerHTML = sorted.map(c => {
+        const pct = Math.round((c.cantidad / total) * 100);
+        const color = COLORES[c.nombre] || '#555';
+        const nombre = NOMBRES_ES[c.nombre] || c.nombre;
+        return `
+          <div class="cluster-fila">
+            <div class="cluster-nombre">${nombre}</div>
+            <div class="cluster-barra-wrap">
+              <div class="cluster-barra" style="width:${pct}%;background:${color};"></div>
+            </div>
+            <div class="cluster-n">${c.cantidad}</div>
+          </div>`;
+      }).join('');
+    }
+
+    document.getElementById('estado-dot').classList.add('vivo');
+    document.getElementById('estado-texto').textContent = 'servidor activo';
+    document.getElementById('update-time').textContent = 
+      'actualizado ' + new Date().toLocaleTimeString('es-CL');
+
+  } catch(e) {
+    document.getElementById('estado-dot').classList.remove('vivo');
+    document.getElementById('estado-texto').textContent = 'sin conexión';
+  }
+}
+
+actualizar();
+setInterval(actualizar, 30000);
+</script>
+</body>
+</html>
