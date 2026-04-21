@@ -176,7 +176,10 @@ def cargar_corpus():
         }, embedding, cluster)
     return jsonify({'status': 'ok', 'cargados': len(datos)})
 
-if __name__ == '__main__':
+# Inicializar DB al arrancar
+with app.app_context():
     init_db()
+
+if __name__ == '__main__':
     print("Servidor iniciado en http://localhost:5000")
     app.run(debug=True, port=5000)
