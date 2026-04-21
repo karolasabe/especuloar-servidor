@@ -6,6 +6,8 @@ import numpy as np
 from datetime import datetime
 
 app = Flask(__name__)
+from flask_cors import CORS
+CORS(app)
 
 DB_PATH = 'corpus.db'
 UMBRAL = 10  # genera nueva imagen cada 10 respuestas nuevas
