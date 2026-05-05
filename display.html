@@ -307,7 +307,7 @@ function dibujar() {
     // Respiración sutil (oscilación del radio)
     m.fase += m.velocidadFase * dt;
     const respira = Math.sin(m.fase) * 8;
-    const radio = m.radioActual + respira;
+    const radio = Math.max(1, m.radioActual + respira);
 
     // Deriva muy lenta (movimiento orgánico)
     m.derivaX += m.velX;
