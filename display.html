@@ -6,229 +6,412 @@
 <title>Espéculo(ar) — corpus vivo</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital@0;1&display=swap');
-  
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  
-  body {
-    background: #0a0a0a;
-    color: #e8e8e0;
-    font-family: 'Space Mono', monospace;
-    min-height: 100vh;
-    padding: 2rem;
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #050505; }
+  body { font-family: 'Space Mono', monospace; color: #888; }
+
+  #canvas-container {
+    position: fixed;
+    inset: 0;
+    z-index: 1;
   }
 
-  .header {
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+
+  #overlay {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 2;
+    padding: 2.5rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    mix-blend-mode: screen;
+  }
+
+  .header-bar {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    margin-bottom: 3rem;
-    border-bottom: 0.5px solid #333;
-    padding-bottom: 1.5rem;
   }
 
-  .titulo { font-size: 13px; letter-spacing: 0.15em; color: #888; }
-  .subtitulo { font-size: 11px; color: #555; margin-top: 4px; font-style: italic; }
-  
+  .titulo {
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    color: #555;
+  }
+
+  .subtitulo {
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    color: #333;
+    margin-top: 6px;
+    font-style: italic;
+  }
+
   .contador {
     text-align: right;
   }
-  .n-respuestas { font-size: 48px; font-weight: normal; color: #e8e8e0; line-height: 1; }
-  .n-label { font-size: 11px; color: #555; margin-top: 4px; letter-spacing: 0.1em; }
 
-  .clusters {
-    margin-bottom: 3rem;
-  }
-
-  .cluster-fila {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    margin-bottom: 12px;
-  }
-
-  .cluster-nombre {
-    font-size: 11px;
-    color: #666;
-    width: 160px;
-    flex-shrink: 0;
-    letter-spacing: 0.05em;
-  }
-
-  .cluster-barra-wrap {
-    flex: 1;
-    height: 2px;
-    background: #1a1a1a;
-    position: relative;
-  }
-
-  .cluster-barra {
-    height: 100%;
-    transition: width 1.5s ease;
-  }
-
-  .cluster-n {
-    font-size: 11px;
-    color: #555;
-    width: 24px;
-    text-align: right;
-    flex-shrink: 0;
-  }
-
-  .prompt-section {
-    border-top: 0.5px solid #222;
-    padding-top: 2rem;
-    margin-bottom: 3rem;
-  }
-
-  .prompt-label {
-    font-size: 10px;
-    color: #444;
-    letter-spacing: 0.15em;
-    margin-bottom: 1rem;
-  }
-
-  .prompt-texto {
-    font-size: 13px;
+  .n-respuestas {
+    font-size: 36px;
+    font-weight: 300;
     color: #aaa;
-    line-height: 1.8;
-    font-style: italic;
-    max-width: 680px;
+    line-height: 1;
+    letter-spacing: -0.02em;
   }
 
-  .footer {
-    border-top: 0.5px solid #1a1a1a;
-    padding-top: 1rem;
+  .n-label {
+    font-size: 9px;
+    color: #444;
+    letter-spacing: 0.2em;
+    margin-top: 4px;
+  }
+
+  .footer-bar {
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-end;
+  }
+
+  .dominante-wrap {
+    max-width: 50%;
+  }
+
+  .dominante-label {
+    font-size: 9px;
+    color: #333;
+    letter-spacing: 0.2em;
+    margin-bottom: 6px;
+  }
+
+  .dominante-valor {
+    font-size: 14px;
+    color: #888;
+    letter-spacing: 0.05em;
+    font-style: italic;
+  }
+
+  .estado {
+    text-align: right;
   }
 
   .estado-dot {
-    width: 6px;
-    height: 6px;
+    width: 5px;
+    height: 5px;
     border-radius: 50%;
-    background: #2a2a2a;
+    background: #1a1a1a;
     display: inline-block;
     margin-right: 6px;
+    vertical-align: middle;
   }
-  .estado-dot.vivo { background: #1D9E75; }
 
-  .update-time { font-size: 10px; color: #333; }
-  .estado-texto { font-size: 10px; color: #444; }
-
-  .cluster-dominante-label {
-    font-size: 10px;
-    color: #444;
-    letter-spacing: 0.1em;
-    margin-bottom: 0.5rem;
+  .estado-dot.vivo {
+    background: #1D9E75;
+    box-shadow: 0 0 8px rgba(29, 158, 117, 0.4);
   }
-  .cluster-dominante-valor {
-    font-size: 20px;
-    color: #e8e8e0;
-    margin-bottom: 2rem;
+
+  .estado-texto {
+    font-size: 9px;
+    color: #333;
+    letter-spacing: 0.15em;
+  }
+
+  /* Palabras flotantes */
+  .palabra-flotante {
+    position: fixed;
+    z-index: 3;
+    font-family: 'Space Mono', monospace;
+    font-size: 14px;
+    color: rgba(220, 220, 220, 0.85);
+    pointer-events: none;
     letter-spacing: 0.05em;
+    font-style: italic;
+    text-shadow: 0 0 12px rgba(0, 0, 0, 0.8);
+    animation: flotar 6s ease-out forwards;
   }
 
-  .error-msg {
-    font-size: 12px;
-    color: #555;
-    font-style: italic;
+  @keyframes flotar {
+    0% {
+      opacity: 0;
+      transform: translateY(0) scale(0.95);
+    }
+    20% {
+      opacity: 1;
+    }
+    80% {
+      opacity: 0.6;
+    }
+    100% {
+      opacity: 0;
+      transform: translateY(-30px) scale(1.05);
+    }
   }
 </style>
 </head>
 <body>
 
-<div class="header">
-  <div>
-    <div class="titulo">ESPÉCULO(AR)</div>
-    <div class="subtitulo">corpus vivo — aprendizaje incremental sobre embeddings</div>
-  </div>
-  <div class="contador">
-    <div class="n-respuestas" id="n-respuestas">—</div>
-    <div class="n-label">VOCES EN EL CORPUS</div>
-  </div>
+<div id="canvas-container">
+  <canvas id="lienzo" aria-label="Visualización del corpus colectivo de Espéculo(ar)"></canvas>
 </div>
 
-<div class="cluster-dominante-label">CAMPO SEMÁNTICO DOMINANTE</div>
-<div class="cluster-dominante-valor" id="dominante">—</div>
-
-<div class="clusters" id="clusters-container">
-  <div class="error-msg">conectando con el corpus...</div>
-</div>
-
-<div class="prompt-section">
-  <div class="prompt-label">SÍNTESIS COMPUTACIONAL ACTUAL — PROMPT GENERADO DESDE EL CORPUS</div>
-  <div class="prompt-texto" id="prompt-actual">—</div>
-</div>
-
-<div class="footer">
-  <div>
-    <span class="estado-dot" id="estado-dot"></span>
-    <span class="estado-texto" id="estado-texto">conectando...</span>
+<div id="overlay">
+  <div class="header-bar">
+    <div>
+      <div class="titulo">ESPÉCULO(AR)</div>
+      <div class="subtitulo">corpus vivo · síntesis incremental</div>
+    </div>
+    <div class="contador">
+      <div class="n-respuestas" id="n-respuestas">—</div>
+      <div class="n-label">VOCES</div>
+    </div>
   </div>
-  <div class="update-time" id="update-time"></div>
+
+  <div class="footer-bar">
+    <div class="dominante-wrap">
+      <div class="dominante-label">CAMPO DOMINANTE</div>
+      <div class="dominante-valor" id="dominante">—</div>
+    </div>
+    <div class="estado">
+      <span class="estado-dot" id="estado-dot"></span>
+      <span class="estado-texto" id="estado-texto">conectando</span>
+    </div>
+  </div>
 </div>
 
 <script>
+// ============================================================
+// COLORES por campo semántico — paletas suaves, casi acuarelas
+// ============================================================
 const COLORES = {
-  'frio_metal':    '#85B7EB',
-  'calor_deseo':   '#ED93B1',
-  'cuerpo_dolor':  '#F0997B',
-  'invasion':      '#AFA9EC',
-  'morgue_muerte': '#B4B2A9',
-  'intimidad':     '#5DCAA5',
-  'mecanico':      '#EF9F27',
-  'organico':      '#97C459'
+  'frio_metal':           { r: 130, g: 180, b: 235 },  // azul agua fría
+  'materialidad_deseada': { r: 235, g: 145, b: 175 },  // rosa pálido
+  'deseo_especulativo':   { r: 100, g: 210, b: 165 },  // verde menta
+  'cuerpo_dolor':         { r: 240, g: 150, b: 120 },  // coral apagado
+  'invasion':             { r: 175, g: 165, b: 235 },  // lavanda
+  'morgue_muerte':        { r: 180, g: 180, b: 175 },  // gris hueso
+  'intimidad_vinculo':    { r: 155, g: 200, b: 110 },  // verde tibio
+  'mecanico':             { r: 235, g: 175, b: 80 },   // ámbar
+  'organico':             { r: 200, g: 95, b: 90 },    // rojo carne
+  'calor_deseo':          { r: 235, g: 160, b: 175 }   // legacy
 };
 
-const NOMBRES_ES = {
-  'frio_metal':    'frío / metal',
-  'calor_deseo':   'calor / deseo',
-  'cuerpo_dolor':  'cuerpo / dolor',
-  'invasion':      'invasión',
-  'morgue_muerte': 'morgue / muerte',
-  'intimidad':     'intimidad / vínculo',
-  'mecanico':      'mecánico / herramienta',
-  'organico':      'orgánico / carne'
+const NOMBRES = {
+  'frio_metal':           'frío · metal',
+  'materialidad_deseada': 'materialidad deseada',
+  'deseo_especulativo':   'deseo especulativo',
+  'cuerpo_dolor':         'cuerpo · dolor',
+  'invasion':             'invasión',
+  'morgue_muerte':        'morgue · muerte',
+  'intimidad_vinculo':    'intimidad · vínculo',
+  'mecanico':             'mecánico',
+  'organico':             'orgánico · carne',
+  'calor_deseo':          'calor · deseo'
 };
 
-async function actualizar() {
+// ============================================================
+// CANVAS
+// ============================================================
+const canvas = document.getElementById('lienzo');
+const ctx = canvas.getContext('2d');
+
+let W = 0, H = 0;
+function ajustarCanvas() {
+  const dpr = window.devicePixelRatio || 1;
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.scale(dpr, dpr);
+}
+ajustarCanvas();
+window.addEventListener('resize', ajustarCanvas);
+
+// ============================================================
+// MANCHAS — cada voz es una mancha de tinta que se difumina
+// ============================================================
+const manchas = [];
+
+function posicionPorCluster(cluster) {
+  // Cada cluster tiene una zona del campo, con dispersión orgánica
+  const zonas = {
+    'frio_metal':           { x: 0.25, y: 0.35 },
+    'materialidad_deseada': { x: 0.70, y: 0.40 },
+    'deseo_especulativo':   { x: 0.55, y: 0.70 },
+    'cuerpo_dolor':         { x: 0.30, y: 0.65 },
+    'invasion':             { x: 0.45, y: 0.30 },
+    'morgue_muerte':        { x: 0.18, y: 0.55 },
+    'intimidad_vinculo':    { x: 0.78, y: 0.65 },
+    'mecanico':             { x: 0.65, y: 0.25 },
+    'organico':             { x: 0.50, y: 0.55 },
+    'calor_deseo':          { x: 0.70, y: 0.40 }
+  };
+  const zona = zonas[cluster] || { x: 0.5, y: 0.5 };
+  // Dispersión orgánica con distribución gaussiana aproximada
+  const angulo = Math.random() * Math.PI * 2;
+  const radio = (Math.random() + Math.random() + Math.random()) / 3 * 0.18;
+  return {
+    x: (zona.x + Math.cos(angulo) * radio) * W,
+    y: (zona.y + Math.sin(angulo) * radio) * H
+  };
+}
+
+function nuevaMancha(cluster, edad = 0) {
+  const color = COLORES[cluster] || { r: 150, g: 150, b: 150 };
+  const pos = posicionPorCluster(cluster);
+  return {
+    x: pos.x,
+    y: pos.y,
+    radioObjetivo: 80 + Math.random() * 60,
+    radioActual: 0,
+    color: color,
+    cluster: cluster,
+    nacimiento: performance.now() - edad * 1000,
+    fase: Math.random() * Math.PI * 2,
+    velocidadFase: 0.0005 + Math.random() * 0.0008,
+    derivaX: 0,
+    derivaY: 0,
+    velX: (Math.random() - 0.5) * 0.05,
+    velY: (Math.random() - 0.5) * 0.05
+  };
+}
+
+// ============================================================
+// LOOP DE ANIMACIÓN
+// ============================================================
+let ultimoTiempo = performance.now();
+
+function dibujar() {
+  const ahora = performance.now();
+  const dt = ahora - ultimoTiempo;
+  ultimoTiempo = ahora;
+
+  // Fondo con leve persistencia (blur acuoso)
+  ctx.fillStyle = 'rgba(5, 5, 5, 0.04)';
+  ctx.fillRect(0, 0, W, H);
+
+  // Dibujar cada mancha
+  manchas.forEach(m => {
+    // Crecimiento del radio hacia su objetivo
+    if (m.radioActual < m.radioObjetivo) {
+      m.radioActual += (m.radioObjetivo - m.radioActual) * 0.015;
+    }
+
+    // Respiración sutil (oscilación del radio)
+    m.fase += m.velocidadFase * dt;
+    const respira = Math.sin(m.fase) * 8;
+    const radio = m.radioActual + respira;
+
+    // Deriva muy lenta (movimiento orgánico)
+    m.derivaX += m.velX;
+    m.derivaY += m.velY;
+    m.velX += (Math.random() - 0.5) * 0.002;
+    m.velY += (Math.random() - 0.5) * 0.002;
+    m.velX *= 0.99;
+    m.velY *= 0.99;
+
+    const x = m.x + m.derivaX;
+    const y = m.y + m.derivaY;
+
+    // Mancha: gradiente radial con alpha bajo, capas múltiples
+    const grad = ctx.createRadialGradient(x, y, 0, x, y, radio);
+    grad.addColorStop(0,   `rgba(${m.color.r}, ${m.color.g}, ${m.color.b}, 0.18)`);
+    grad.addColorStop(0.4, `rgba(${m.color.r}, ${m.color.g}, ${m.color.b}, 0.10)`);
+    grad.addColorStop(0.8, `rgba(${m.color.r}, ${m.color.g}, ${m.color.b}, 0.03)`);
+    grad.addColorStop(1,   `rgba(${m.color.r}, ${m.color.g}, ${m.color.b}, 0)`);
+
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(x, y, radio, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  requestAnimationFrame(dibujar);
+}
+requestAnimationFrame(dibujar);
+
+// ============================================================
+// PALABRAS FLOTANTES
+// ============================================================
+function mostrarPalabra(texto, cluster) {
+  if (!texto) return;
+  const palabra = document.createElement('div');
+  palabra.className = 'palabra-flotante';
+  palabra.textContent = texto;
+
+  const pos = posicionPorCluster(cluster);
+  palabra.style.left = (pos.x - 60) + 'px';
+  palabra.style.top = pos.y + 'px';
+
+  document.body.appendChild(palabra);
+  setTimeout(() => palabra.remove(), 6500);
+}
+
+// Extraer una palabra significativa del texto
+function extraerPalabraClave(texto) {
+  if (!texto) return null;
+  const palabras = texto.toLowerCase()
+    .replace(/[.,;:!?¿¡()]/g, '')
+    .split(/\s+/)
+    .filter(p => p.length > 4);
+  // Priorizar palabras del vocabulario somático
+  const interesantes = ['frío','dolor','metal','helado','invasión','vergüenza','miedo',
+    'morgue','ganado','abrelatas','sacacorcho','castigo','silicona','tibio','suave',
+    'descuartizar','carnicería','ultraje','animal','cuchillo','tornillo','chirrido'];
+  const encontrada = palabras.find(p => interesantes.some(i => p.includes(i)));
+  if (encontrada) return encontrada;
+  return palabras[Math.floor(Math.random() * palabras.length)] || null;
+}
+
+// ============================================================
+// CONEXIÓN AL SERVIDOR
+// ============================================================
+const API = 'https://especuloar-servidor.onrender.com/estado';
+let ultimoTotal = 0;
+let inicializado = false;
+
+async function consultar() {
   try {
-    const res = await fetch('https://especuloar-servidor.onrender.com/estado');
+    const res = await fetch(API);
     const data = await res.json();
 
     document.getElementById('n-respuestas').textContent = data.total_respuestas;
-    document.getElementById('dominante').textContent = 
-      NOMBRES_ES[data.cluster_dominante] || data.cluster_dominante || '—';
-    document.getElementById('prompt-actual').textContent = 
-      data.prompt_actual || 'corpus insuficiente para síntesis';
-
-    const total = data.clusters.reduce((s, c) => s + c.cantidad, 0) || 1;
-    const container = document.getElementById('clusters-container');
-    
-    if (data.clusters.length === 0) {
-      container.innerHTML = '<div class="error-msg">sin datos aún</div>';
-    } else {
-      const sorted = [...data.clusters].sort((a,b) => b.cantidad - a.cantidad);
-      container.innerHTML = sorted.map(c => {
-        const pct = Math.round((c.cantidad / total) * 100);
-        const color = COLORES[c.nombre] || '#555';
-        const nombre = NOMBRES_ES[c.nombre] || c.nombre;
-        return `
-          <div class="cluster-fila">
-            <div class="cluster-nombre">${nombre}</div>
-            <div class="cluster-barra-wrap">
-              <div class="cluster-barra" style="width:${pct}%;background:${color};"></div>
-            </div>
-            <div class="cluster-n">${c.cantidad}</div>
-          </div>`;
-      }).join('');
-    }
+    document.getElementById('dominante').textContent =
+      NOMBRES[data.cluster_dominante] || data.cluster_dominante || '—';
 
     document.getElementById('estado-dot').classList.add('vivo');
-    document.getElementById('estado-texto').textContent = 'servidor activo';
-    document.getElementById('update-time').textContent = 
-      'actualizado ' + new Date().toLocaleTimeString('es-CL');
+    document.getElementById('estado-texto').textContent = 'corpus activo';
+
+    // Inicialización: poblar manchas existentes con leve aleatoriedad temporal
+    if (!inicializado && data.total_respuestas > 0) {
+      data.clusters.forEach(c => {
+        for (let i = 0; i < c.cantidad; i++) {
+          manchas.push(nuevaMancha(c.nombre, Math.random() * 30));
+        }
+      });
+      inicializado = true;
+      ultimoTotal = data.total_respuestas;
+    }
+    // Detectar respuestas nuevas
+    else if (data.total_respuestas > ultimoTotal) {
+      const nuevas = data.total_respuestas - ultimoTotal;
+      // Identificar el cluster dominante de las nuevas (aproximación)
+      const cluster = data.cluster_dominante || 'frio_metal';
+      for (let i = 0; i < nuevas; i++) {
+        setTimeout(() => {
+          manchas.push(nuevaMancha(cluster));
+          mostrarPalabra(extraerPalabraClave(data.prompt_actual) || 'voz', cluster);
+        }, i * 600);
+      }
+      ultimoTotal = data.total_respuestas;
+    }
 
   } catch(e) {
     document.getElementById('estado-dot').classList.remove('vivo');
@@ -236,8 +419,8 @@ async function actualizar() {
   }
 }
 
-actualizar();
-setInterval(actualizar, 30000);
+consultar();
+setInterval(consultar, 5000); // cada 5 segundos para que la actividad se sienta viva
 </script>
 </body>
 </html>
