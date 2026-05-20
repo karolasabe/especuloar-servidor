@@ -223,7 +223,8 @@ def guardar_respuesta(relato, correo, categorias_activadas):
             VALUES (%s,%s,%s,%s)''',
             (respuesta_id, cat, intensidad, datetime.now().isoformat()))
     conn.commit()
-    n = c.execute('SELECT COUNT(*) FROM respuestas').fetchone()[0]
+    c.execute('SELECT COUNT(*) FROM respuestas')
+    n = c.fetchone()[0]
     conn.close()
     return respuesta_id, n
 
@@ -266,7 +267,8 @@ def webhook():
 def estado():
     conn = get_conn()
     c = conn.cursor()
-    n_respuestas = c.execute('SELECT COUNT(*) FROM respuestas').fetchone()[0]
+    c.execute('SELECT COUNT(*) FROM respuestas')
+    n_respuestas = c.fetchone()[0]
     c.execute(
         'SELECT categoria, COUNT(*) as n, AVG(intensidad) as avg_int '
         'FROM pintitas GROUP BY categoria ORDER BY n DESC'
