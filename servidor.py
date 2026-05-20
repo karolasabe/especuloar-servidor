@@ -1,187 +1,358 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 import json
 import os
-import sqlite3
-import numpy as np
+import psycopg2
+import psycopg2.extras
 from datetime import datetime
 
 app = Flask(__name__)
-from flask_cors import CORS
 CORS(app)
 
-DB_PATH = 'corpus.db'
-UMBRAL = 10  # genera nueva imagen cada 10 respuestas nuevas
+DATABASE_URL = os.environ.get('DATABASE_URL')
+UMBRAL = 5
 
-# --- Base de datos ---
+# ============================================================
+# DICCIONARIO DE CATEGORÍAS — 9 campos semánticos
+# ============================================================
+CATEGORIAS = {
+    'dolor_fisico': {
+        'color': '#E8453A',
+        'nombre_es': 'dolor físico',
+        'nombre_en': 'physical pain',
+        'palabras': [
+            'dolor','duele','duelen','dolió','doloroso','ardor','arde','ardía',
+            'punzada','punzadas','pinchazo','pinchazos','quemar','quema','quemaba',
+            'desgarrar','desgarro','desgarramiento','cortar','cortante',
+            'lastimar','lastimó','lastimaba','herida','heridas',
+            'rasgar','rasgado','presión','presiona','presionaba',
+            'calambres','calambre','contractura','contracción',
+            'insoportable','agudo','aguda','intenso','intensa',
+            'lacerante','punzante','brutalmente','brutal',
+            'hurt','hurts','pain','painful','ache','aching','burning','sharp','cramp'
+        ]
+    },
+    'frio_metal': {
+        'color': '#5A8FD4',
+        'nombre_es': 'material metálico / frío / desagradable',
+        'nombre_en': 'metallic / cold / unpleasant',
+        'palabras': [
+            'frío','fría','frías','fríos','helado','helada','congelado','congelante',
+            'metal','metálico','metálica','acero','hierro','inoxidable',
+            'duro','dura','rígido','rígida','áspero','áspera',
+            'chirría','chirrido','chirriar','cruje','crujido','ruido','estridente',
+            'instrumento','aparato','dispositivo','máquina','herramienta',
+            'invasivo','invasiva','penetrar','penetración',
+            'abrelatas','sacacorcho','pinza','tenaza','tornillo','tuerca',
+            'desagradable','molesto','molesta','incómodo','incómoda',
+            'cold','metal','metallic','rigid','hard','device','instrument','invasive'
+        ]
+    },
+    'materiales_agradables': {
+        'color': '#E8935A',
+        'nombre_es': 'materiales agradables / cálidos',
+        'nombre_en': 'pleasant / warm materials',
+        'palabras': [
+            'tibio','tibia','cálido','cálida','caliente','calientito',
+            'suave','suavidad','blando','blanda','flexible','morbido',
+            'silicona','goma','plástico blando','algodón','tela',
+            'perfume','aroma','olor agradable','floral',
+            'pequeño','pequeña','diminuto','liviano','ligero',
+            'ergonómico','ergonómica','adaptable','amigable',
+            'reconfortante','confortable','cómodo','cómoda',
+            'warm','soft','gentle','comfortable','smooth','flexible'
+        ]
+    },
+    'miedo_ansiedad': {
+        'color': '#9E9E9E',
+        'nombre_es': 'miedo / ansiedad / preocupación',
+        'nombre_en': 'fear / anxiety / worry',
+        'palabras': [
+            'miedo','miedosa','aterrada','aterrador','aterradora',
+            'ansiedad','ansiosa','ansioso','angustia','angustiada',
+            'nervios','nerviosa','nervioso','nerviosismo',
+            'temor','temores','temer','pánico','terror','terrorífica',
+            'preocupación','preocupada','preocupante',
+            'anticipación','anticipar','esperar lo peor',
+            'taquicardia','sudor','temblor','temblaba',
+            'llorar','lloraba','lloré','llanto','lágrimas',
+            'dread','fear','anxiety','panic','terror','scared','nervous','worried'
+        ]
+    },
+    'sensaciones_agradables': {
+        'color': '#D4847A',
+        'nombre_es': 'sensaciones agradables / seguridad / calma',
+        'nombre_en': 'pleasant sensations / safety / calm',
+        'palabras': [
+            'tranquila','tranquilidad','tranquilizadora','calma','calmada',
+            'segura','seguridad','confianza','confiable',
+            'alivio','aliviada','reconfortada',
+            'cómoda','comodidad','bien','bienestar',
+            'profesional amable','trato amable','gentil','gentileza',
+            'explicación','explicó','informó','avisó','preparó',
+            'respeto','respetuosa','respetuoso','dignidad',
+            'empática','empatía','comprensión','comprensiva',
+            'safe','comfortable','calm','relief','trust','gentle','kind','reassured'
+        ]
+    },
+    'normalizacion': {
+        'color': '#6BBF8A',
+        'nombre_es': 'normalización / resignación',
+        'nombre_en': 'normalization / resignation',
+        'palabras': [
+            'normal','normalidad','normalizar','rutina','rutinario',
+            'necesario','necesaria','hay que hacerlo','toca hacerlo',
+            'resignada','resignación','resignarse','acostumbrada',
+            'tolerable','toleraba','aguantar','aguantaba','soportar','soportaba',
+            'trámite','obligación','obligatoria','deber',
+            'siempre es así','así es','así funciona',
+            'nada nuevo','lo de siempre','ya sé cómo es',
+            'inevitable','inevitablemente',
+            'routine','necessary','tolerate','endure','resign','accept'
+        ]
+    },
+    'vivencia_sexual_traumatica': {
+        'color': '#9B6BBF',
+        'nombre_es': 'vivencia sexual traumática',
+        'nombre_en': 'traumatic sexual experience',
+        'palabras': [
+            'violación','violar','violada',
+            'abuso sexual','abusada sexualmente',
+            'obscenidad','obsceno','obscena','lascivo','lascivia',
+            'erección','erecto','excitado','excitación',
+            'tocó más de la cuenta','tocaron más de la cuenta',
+            'tocó donde no debía','manoseo','manoseada','manosearon',
+            'sin consentimiento','sin mi consentimiento',
+            'acoso','acosada','acosaron','conducta inapropiada',
+            'assault','sexual abuse','erection','inappropriate touching',
+            'without consent','harassment'
+        ]
+    },
+    'profesional_masculino': {
+        'color': '#1A3A6B',
+        'nombre_es': 'profesional masculino',
+        'nombre_en': 'male professional',
+        'palabras': [
+            'médico','doctor','ginecólogo','especialista hombre',
+            'él'
+        ]
+    },
+    'profesional_femenino': {
+        'color': '#D4B800',
+        'nombre_es': 'profesional femenina',
+        'nombre_en': 'female professional',
+        'palabras': [
+            'médica','doctora','ginecóloga','matrona','obstétrica',
+            'ella'
+        ]
+    }
+}
+
+# ============================================================
+# BASE DE DATOS
+# ============================================================
+def get_conn():
+    return psycopg2.connect(DATABASE_URL, sslmode='require')
+
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_conn()
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS respuestas (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         timestamp TEXT,
-        edad TEXT,
-        sistema_salud TEXT,
-        imagen_mental TEXT,
-        deseo TEXT,
-        embedding TEXT,
-        cluster TEXT,
-        sintetico INTEGER DEFAULT 0
+        relato TEXT,
+        correo TEXT,
+        idioma TEXT,
+        categorias_activadas TEXT,
+        intensidades TEXT
     )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS imagenes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        timestamp TEXT,
-        n_respuestas INTEGER,
-        prompt TEXT,
-        cluster_dominante TEXT,
-        url_imagen TEXT
+    c.execute('''CREATE TABLE IF NOT EXISTS pintitas (
+        id SERIAL PRIMARY KEY,
+        respuesta_id INTEGER,
+        categoria TEXT,
+        intensidad REAL,
+        timestamp TEXT
     )''')
     conn.commit()
     conn.close()
 
-def guardar_respuesta(datos, embedding, cluster):
-    conn = sqlite3.connect(DB_PATH)
+with app.app_context():
+    init_db()
+
+# ============================================================
+# ANÁLISIS SEMÁNTICO
+# ============================================================
+def analizar_relato(texto):
+    texto_lower = texto.lower()
+    resultado = {}
+    for cat, datos in CATEGORIAS.items():
+        menciones = sum(1 for p in datos['palabras'] if p in texto_lower)
+        if menciones > 0:
+            palabras_texto = max(1, len(texto.split()))
+            intensidad = min(1.0, menciones / max(1, palabras_texto / 20))
+            resultado[cat] = round(intensidad, 3)
+    return resultado
+
+def detectar_idioma(texto):
+    palabras_es = ['que','con','una','por','para','como','pero','los','las','del']
+    palabras_en = ['the','and','that','with','for','this','but','are','was','have']
+    score_es = sum(1 for p in palabras_es if f' {p} ' in f' {texto.lower()} ')
+    score_en = sum(1 for p in palabras_en if f' {p} ' in f' {texto.lower()} ')
+    return 'es' if score_es >= score_en else 'en'
+
+# ============================================================
+# GUARDAR
+# ============================================================
+def guardar_respuesta(relato, correo, categorias_activadas):
+    conn = get_conn()
     c = conn.cursor()
-    c.execute('''INSERT INTO respuestas 
-        (timestamp, edad, sistema_salud, imagen_mental, deseo, embedding, cluster, sintetico)
-        VALUES (?,?,?,?,?,?,?,?)''',
+    idioma = detectar_idioma(relato)
+    c.execute('''INSERT INTO respuestas
+        (timestamp, relato, correo, idioma, categorias_activadas, intensidades)
+        VALUES (%s,%s,%s,%s,%s,%s) RETURNING id''',
         (datetime.now().isoformat(),
-         datos.get('edad', ''),
-         datos.get('sistema_salud', ''),
-         datos.get('imagen_mental', ''),
-         datos.get('deseo', ''),
-         json.dumps(embedding),
-         cluster,
-         datos.get('sintetico', 0)))
+         relato,
+         correo,
+         idioma,
+         json.dumps(list(categorias_activadas.keys())),
+         json.dumps(categorias_activadas)))
+    respuesta_id = c.fetchone()[0]
+    for cat, intensidad in categorias_activadas.items():
+        c.execute('''INSERT INTO pintitas
+            (respuesta_id, categoria, intensidad, timestamp)
+            VALUES (%s,%s,%s,%s)''',
+            (respuesta_id, cat, intensidad, datetime.now().isoformat()))
     conn.commit()
     n = c.execute('SELECT COUNT(*) FROM respuestas').fetchone()[0]
     conn.close()
-    return n
+    return respuesta_id, n
 
-def contar_respuestas():
-    conn = sqlite3.connect(DB_PATH)
-    n = conn.execute('SELECT COUNT(*) FROM respuestas').fetchone()[0]
-    conn.close()
-    return n
-
-# --- Embeddings simplificados ---
-DIMENSIONES = {
-    'frio_metal': ['frío','helado','metal','acero','gris','plateado','oscuro'],
-    'calor_deseo': ['tibio','cálido','suave','blando','silicona','rosa','morado','flor'],
-    'cuerpo_dolor': ['dolor','cuerpo','músculo','contracción','sangre','herida','presión'],
-    'invasion': ['invasión','abrir','forzar','entrar','romper','vulnerar','exponer'],
-    'morgue_muerte': ['morgue','muerte','fría','blanca','silencio','quietud','instrumental'],
-    'intimidad': ['íntimo','privado','segura','confianza','cuidado','gentil','suave'],
-    'mecanico': ['metal','tornillo','herramienta','máquina','clic','chirrido','abrelatas'],
-    'organico': ['carne','piel','tejido','músculo','fluido','vivo','orgánico']
-}
-
-def calcular_embedding(texto):
-    texto_lower = texto.lower()
-    vector = []
-    for dim, palabras in DIMENSIONES.items():
-        score = sum(1 for p in palabras if p in texto_lower)
-        vector.append(score)
-    total = sum(vector) or 1
-    return [v/total for v in vector]
-
-def calcular_cluster(embedding):
-    dims = list(DIMENSIONES.keys())
-    return dims[np.argmax(embedding)]
-
-def generar_prompt_sintetico():
-    conn = sqlite3.connect(DB_PATH)
-    rows = conn.execute('SELECT imagen_mental, deseo, cluster FROM respuestas').fetchall()
-    conn.close()
-    
-    clusters = {}
-    for imagen, deseo, cluster in rows:
-        if cluster not in clusters:
-            clusters[cluster] = {'imagenes': [], 'deseos': []}
-        if imagen:
-            clusters[cluster]['imagenes'].append(imagen[:100])
-        if deseo:
-            clusters[cluster]['deseos'].append(deseo[:100])
-    
-    dominante = max(clusters, key=lambda k: len(clusters[k]['imagenes'])) if clusters else 'frio_metal'
-    
-    imagenes_sample = clusters.get(dominante, {}).get('imagenes', [])[:5]
-    deseos_sample = []
-    for c in clusters.values():
-        deseos_sample.extend(c.get('deseos', [])[:2])
-    
-    prompt = f"""A gynecological speculum reimagined through {contar_respuestas()} women's mental images. 
-Dominant vision: {dominante.replace('_',' ')}. 
-Collective imagination: {', '.join(imagenes_sample[:3])}. 
-Collective desire: {', '.join(deseos_sample[:3])}. 
-Hyperrealistic surreal sculpture, studio photography, cinematic light, 8k, no text."""
-    
-    return prompt, dominante
-
-# --- Rutas ---
+# ============================================================
+# ENDPOINTS
+# ============================================================
 @app.route('/webhook', methods=['POST'])
 def webhook():
     datos = request.json or {}
-    
-    texto = datos.get('imagen_mental', '') + ' ' + datos.get('deseo', '')
-    embedding = calcular_embedding(texto)
-    cluster = calcular_cluster(embedding)
-    
-    n_total = guardar_respuesta(datos, embedding, cluster)
-    
-    respuesta = {
+    relato = ''
+    correo = ''
+
+    if 'data' in datos:
+        for field in datos.get('data', {}).get('fields', []):
+            if field.get('type') == 'TEXTAREA':
+                relato = field.get('value', '')
+            if field.get('type') == 'INPUT_EMAIL':
+                correo = field.get('value', '')
+
+    if not relato:
+        relato = datos.get('relato', datos.get('texto', datos.get('story', '')))
+    if not correo:
+        correo = datos.get('correo', datos.get('email', ''))
+
+    if not relato:
+        return jsonify({'status': 'error', 'mensaje': 'sin relato'}), 400
+
+    categorias = analizar_relato(relato)
+    respuesta_id, n_total = guardar_respuesta(relato, correo, categorias)
+
+    return jsonify({
         'status': 'ok',
-        'id': n_total,
-        'cluster': cluster,
-        'total_respuestas': n_total
-    }
-    
-    if n_total % UMBRAL == 0:
-        prompt, cluster_dom = generar_prompt_sintetico()
-        respuesta['nueva_imagen'] = True
-        respuesta['prompt'] = prompt
-        respuesta['cluster_dominante'] = cluster_dom
-        print(f"UMBRAL ALCANZADO — {n_total} respuestas — prompt generado")
-    
-    return jsonify(respuesta)
+        'id': respuesta_id,
+        'total_respuestas': n_total,
+        'categorias_activadas': categorias,
+        'nueva_sintesis': n_total % UMBRAL == 0
+    })
 
 @app.route('/estado', methods=['GET'])
 def estado():
-    conn = sqlite3.connect(DB_PATH)
-    n = conn.execute('SELECT COUNT(*) FROM respuestas').fetchone()[0]
-    clusters = conn.execute(
-        'SELECT cluster, COUNT(*) as c FROM respuestas GROUP BY cluster ORDER BY c DESC'
-    ).fetchall()
+    conn = get_conn()
+    c = conn.cursor()
+    n_respuestas = c.execute('SELECT COUNT(*) FROM respuestas').fetchone()[0]
+    c.execute(
+        'SELECT categoria, COUNT(*) as n, AVG(intensidad) as avg_int '
+        'FROM pintitas GROUP BY categoria ORDER BY n DESC'
+    )
+    pintitas = c.fetchall()
     conn.close()
-    
-    prompt, dominante = generar_prompt_sintetico() if n > 0 else ('', '')
-    
+
+    datos_pintitas = [{
+        'categoria': p[0],
+        'cantidad': p[1],
+        'intensidad_promedio': round(p[2], 3),
+        'color': CATEGORIAS.get(p[0], {}).get('color', '#888'),
+        'nombre_es': CATEGORIAS.get(p[0], {}).get('nombre_es', p[0]),
+        'nombre_en': CATEGORIAS.get(p[0], {}).get('nombre_en', p[0])
+    } for p in pintitas]
+
     return jsonify({
-        'total_respuestas': n,
-        'clusters': [{'nombre': r[0], 'cantidad': r[1]} for r in clusters],
-        'cluster_dominante': dominante,
-        'prompt_actual': prompt
+        'total_respuestas': n_respuestas,
+        'pintitas': datos_pintitas
+    })
+
+@app.route('/pintitas_recientes', methods=['GET'])
+def pintitas_recientes():
+    n = int(request.args.get('n', 20))
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(
+        'SELECT id, respuesta_id, categoria, intensidad, timestamp '
+        'FROM pintitas ORDER BY id DESC LIMIT %s', (n,)
+    )
+    rows = c.fetchall()
+    conn.close()
+    return jsonify([{
+        'id': r[0],
+        'respuesta_id': r[1],
+        'categoria': r[2],
+        'intensidad': r[3],
+        'color': CATEGORIAS.get(r[2], {}).get('color', '#888'),
+        'nombre_es': CATEGORIAS.get(r[2], {}).get('nombre_es', r[2]),
+        'timestamp': r[4]
+    } for r in rows])
+
+@app.route('/relato/<int:respuesta_id>', methods=['GET'])
+def obtener_relato(respuesta_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(
+        'SELECT relato, idioma, categorias_activadas, intensidades, timestamp '
+        'FROM respuestas WHERE id = %s', (respuesta_id,)
+    )
+    row = c.fetchone()
+    conn.close()
+    if not row:
+        return jsonify({'error': 'no encontrado'}), 404
+    return jsonify({
+        'id': respuesta_id,
+        'relato': row[0],
+        'idioma': row[1],
+        'categorias_activadas': json.loads(row[2]),
+        'intensidades': json.loads(row[3]),
+        'timestamp': row[4]
     })
 
 @app.route('/cargar_corpus', methods=['POST'])
 def cargar_corpus():
     datos = request.json or []
+    cargados = 0
     for r in datos:
-        texto = r.get('relato', '')
-        embedding = calcular_embedding(texto)
-        cluster = calcular_cluster(embedding)
-        guardar_respuesta({
-            'edad': r.get('edad', ''),
-            'sistema_salud': r.get('sistema_salud', ''),
-            'imagen_mental': texto[:500],
-            'deseo': '',
-            'sintetico': r.get('sintetico', 0)
-        }, embedding, cluster)
-    return jsonify({'status': 'ok', 'cargados': len(datos)})
+        relato = r.get('relato_experiencia', r.get('relato', ''))
+        correo = r.get('correo', r.get('email', ''))
+        if relato:
+            categorias = analizar_relato(relato)
+            guardar_respuesta(relato, correo, categorias)
+            cargados += 1
+    return jsonify({'status': 'ok', 'cargados': cargados})
 
-# Inicializar DB al arrancar
-with app.app_context():
-    init_db()
+@app.route('/reiniciar', methods=['POST'])
+def reiniciar():
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('DELETE FROM respuestas')
+    c.execute('DELETE FROM pintitas')
+    conn.commit()
+    conn.close()
+    return jsonify({'status': 'ok', 'mensaje': 'corpus reiniciado'})
 
 if __name__ == '__main__':
-    print("Servidor iniciado en http://localhost:5000")
+    print('Servidor Espéculo(ar) exp2 — Supabase')
     app.run(debug=True, port=5000)
