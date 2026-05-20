@@ -2,181 +2,107 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Espéculo(ar) — corpus vivo</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Espéculo(ar) — galaxia</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital@0;1&display=swap');
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { width: 100%; height: 100%; overflow: hidden; background: #050505; }
-  body { font-family: 'Space Mono', monospace; color: #888; }
-
-  #canvas-container {
-    position: fixed;
-    inset: 0;
-    z-index: 1;
-  }
-
-  canvas {
-    display: block;
-    width: 100%;
-    height: 100%;
-  }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #09050a; }
+  body { font-family: 'Space Mono', monospace; }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; }
 
   #overlay {
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    z-index: 2;
-    padding: 2.5rem;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    mix-blend-mode: screen;
+    position: fixed; inset: 0; pointer-events: none; z-index: 2;
+    padding: 1.8rem 1.8rem 5rem 1.8rem;
+    display: flex; flex-direction: column; justify-content: space-between;
+  }
+  .header-bar { display: flex; justify-content: space-between; align-items: flex-start; }
+  .titulo { font-size: 11px; letter-spacing: 0.2em; color: #555; }
+  .subtitulo { font-size: 10px; letter-spacing: 0.1em; color: #333; margin-top: 5px; font-style: italic; }
+  .contador { text-align: right; }
+  .n-respuestas { font-size: 38px; font-weight: 300; color: #888; line-height: 1; }
+  .n-label { font-size: 9px; color: #444; letter-spacing: 0.2em; margin-top: 3px; }
+
+  .footer-bar { display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 0.8rem; }
+  .leyenda {
+    display: flex; flex-wrap: wrap; gap: 8px 14px; max-width: 78%;
+    pointer-events: auto;
+  }
+  .leyenda-item {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 9px; color: #777; letter-spacing: 0.04em;
+    cursor: pointer; user-select: none; padding: 3px 2px;
+    transition: opacity 0.25s, color 0.25s;
+  }
+  .leyenda-item:hover { color: #bbb; }
+  .leyenda-item.apagado { opacity: 0.28; }
+  .leyenda-dot { width: 8px; height: 8px; border-radius: 50%; transition: opacity 0.25s; flex-shrink: 0; }
+
+  .estado { text-align: right; }
+  .estado-dot { width: 5px; height: 5px; border-radius: 50%; background: #1a1a1a; display: inline-block; margin-right: 5px; vertical-align: middle; }
+  .estado-dot.vivo { background: #1D9E75; box-shadow: 0 0 6px rgba(29,158,117,0.5); }
+  .estado-texto { font-size: 9px; color: #444; letter-spacing: 0.12em; }
+
+  .zoom-hint {
+    position: fixed; bottom: 1.6rem; left: 50%;
+    transform: translateX(-50%);
+    font-size: 9px; color: rgba(180,160,140,0.38); letter-spacing: 0.15em;
+    pointer-events: none; z-index: 3;
   }
 
-  .header-bar {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
+  #modal {
+    position: fixed; inset: 0; z-index: 100;
+    display: none; align-items: center; justify-content: center;
+    background: rgba(3,3,3,0.9); padding: 2rem;
+    backdrop-filter: blur(10px);
   }
-
-  .titulo {
-    font-size: 11px;
-    letter-spacing: 0.2em;
-    color: #555;
+  #modal.activo { display: flex; }
+  .modal-contenido {
+    background: #0a0a0a; border: 0.5px solid #1e1e1e;
+    max-width: 600px; width: 100%; padding: 2.5rem;
+    max-height: 80vh; overflow-y: auto;
+    color: #ccc; font-family: 'Space Mono', monospace;
+    font-size: 13.5px; line-height: 1.75; position: relative;
   }
-
-  .subtitulo {
-    font-size: 10px;
-    letter-spacing: 0.1em;
-    color: #333;
-    margin-top: 6px;
-    font-style: italic;
+  .modal-categorias { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 1.4rem; }
+  .modal-cat-chip { font-size: 9.5px; padding: 3px 9px; border-radius: 10px; color: #fff; letter-spacing: 0.04em; }
+  .modal-relato { white-space: pre-wrap; color: #d8d8d8; }
+  .modal-cerrar {
+    position: absolute; top: 1rem; right: 1.4rem;
+    background: transparent; border: none; color: #555;
+    font-size: 11px; cursor: pointer; font-family: inherit; letter-spacing: 0.1em;
   }
+  .modal-cerrar:hover { color: #ccc; }
 
-  .contador {
-    text-align: right;
-  }
-
-  .n-respuestas {
-    font-size: 36px;
-    font-weight: 300;
-    color: #aaa;
-    line-height: 1;
-    letter-spacing: -0.02em;
-  }
-
-  .n-label {
-    font-size: 9px;
-    color: #444;
-    letter-spacing: 0.2em;
-    margin-top: 4px;
-  }
-
-  .footer-bar {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-end;
-  }
-
-  .dominante-wrap {
-    max-width: 50%;
-  }
-
-  .dominante-label {
-    font-size: 9px;
-    color: #333;
-    letter-spacing: 0.2em;
-    margin-bottom: 6px;
-  }
-
-  .dominante-valor {
-    font-size: 14px;
-    color: #888;
-    letter-spacing: 0.05em;
-    font-style: italic;
-  }
-
-  .estado {
-    text-align: right;
-  }
-
-  .estado-dot {
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: #1a1a1a;
-    display: inline-block;
-    margin-right: 6px;
-    vertical-align: middle;
-  }
-
-  .estado-dot.vivo {
-    background: #1D9E75;
-    box-shadow: 0 0 8px rgba(29, 158, 117, 0.4);
-  }
-
-  .estado-texto {
-    font-size: 9px;
-    color: #333;
-    letter-spacing: 0.15em;
-  }
-
-  /* Palabras flotantes */
-  .palabra-flotante {
-    position: fixed;
-    z-index: 3;
-    font-family: 'Space Mono', monospace;
-    font-size: 14px;
-    color: rgba(220, 220, 220, 0.85);
-    pointer-events: none;
-    letter-spacing: 0.05em;
-    font-style: italic;
-    text-shadow: 0 0 12px rgba(0, 0, 0, 0.8);
-    animation: flotar 6s ease-out forwards;
-  }
-
-  @keyframes flotar {
-    0% {
-      opacity: 0;
-      transform: translateY(0) scale(0.95);
-    }
-    20% {
-      opacity: 1;
-    }
-    80% {
-      opacity: 0.6;
-    }
-    100% {
-      opacity: 0;
-      transform: translateY(-30px) scale(1.05);
-    }
+  @media (max-width: 640px) {
+    #overlay { padding: 1.1rem; }
+    .n-respuestas { font-size: 28px; }
+    .footer-bar { align-items: flex-end; }
+    .leyenda { max-width: 78%; gap: 5px 9px; }
+    .leyenda-item { font-size: 7.2px; gap: 4px; padding: 2px 0; line-height: 1.15; color: rgba(220,210,198,0.62); }
+    .leyenda-dot { width: 7px; height: 7px; }
+    .estado-texto { color: rgba(220,210,198,0.54); }
+    .zoom-hint { display: none; }
+    .modal-contenido { padding: 1.4rem; font-size: 12.5px; }
   }
 </style>
 </head>
 <body>
-
-<div id="canvas-container">
-  <canvas id="lienzo" aria-label="Visualización del corpus colectivo de Espéculo(ar)"></canvas>
-</div>
+<canvas id="lienzo" aria-label="Galaxia colectiva de Espéculo(ar)"></canvas>
 
 <div id="overlay">
   <div class="header-bar">
     <div>
       <div class="titulo">ESPÉCULO(AR)</div>
-      <div class="subtitulo">corpus vivo · síntesis incremental</div>
+      <div class="subtitulo">galaxia colectiva · tecnologías de género</div>
     </div>
     <div class="contador">
       <div class="n-respuestas" id="n-respuestas">—</div>
       <div class="n-label">VOCES</div>
     </div>
   </div>
-
   <div class="footer-bar">
-    <div class="dominante-wrap">
-      <div class="dominante-label">CAMPO DOMINANTE</div>
-      <div class="dominante-valor" id="dominante">—</div>
-    </div>
+    <div class="leyenda" id="leyenda"></div>
     <div class="estado">
       <span class="estado-dot" id="estado-dot"></span>
       <span class="estado-texto" id="estado-texto">conectando</span>
@@ -184,243 +110,1214 @@
   </div>
 </div>
 
+<div class="zoom-hint">agita el cursor para revelar relatos · pellizca / rueda para zoom · arrastra para mover</div>
+
+<div id="modal" role="dialog" aria-modal="true">
+  <div class="modal-contenido">
+    <button class="modal-cerrar" onclick="cerrarModal()">cerrar</button>
+    <div class="modal-categorias" id="modal-cats"></div>
+    <div class="modal-relato" id="modal-texto"></div>
+  </div>
+</div>
+
 <script>
 // ============================================================
-// COLORES por campo semántico — paletas suaves, casi acuarelas
+// CONFIGURACIÓN
 // ============================================================
-const COLORES = {
-  'frio_metal':           { r: 130, g: 180, b: 235 },  // azul agua fría
-  'materialidad_deseada': { r: 235, g: 145, b: 175 },  // rosa pálido
-  'deseo_especulativo':   { r: 100, g: 210, b: 165 },  // verde menta
-  'cuerpo_dolor':         { r: 240, g: 150, b: 120 },  // coral apagado
-  'invasion':             { r: 175, g: 165, b: 235 },  // lavanda
-  'morgue_muerte':        { r: 180, g: 180, b: 175 },  // gris hueso
-  'intimidad_vinculo':    { r: 155, g: 200, b: 110 },  // verde tibio
-  'mecanico':             { r: 235, g: 175, b: 80 },   // ámbar
-  'organico':             { r: 200, g: 95, b: 90 },    // rojo carne
-  'calor_deseo':          { r: 235, g: 160, b: 175 }   // legacy
+// API_BASE: el servidor de API vive en Render. Esta página se sirve como
+// archivo estático desde GitHub Pages (otro origen distinto al de la API).
+// - En GitHub Pages (karolasabe.github.io) o cualquier host remoto → Render.
+// - En desarrollo local (localhost / 127.0.0.1) con el Flask de servidor.py
+//   sirviendo todo en el mismo origen → usa ese origen local.
+// Así el mismo archivo funciona tanto desplegado como en debug local.
+const RENDER_API = 'https://especuloar-servidor.onrender.com';
+const _esLocal = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+const API_BASE = (_esLocal && window.location.protocol.startsWith('http'))
+    ? window.location.origin
+    : RENDER_API;
+const POLL_INTERVAL = 5000;
+
+const CATEGORIAS = {
+  'dolor_fisico':              { color: '#FF2424', nombre: 'Dolor físico' },
+  'frio_metal':                { color: '#2EC4D8', nombre: 'Materiales desagradables/fríos' },
+  'materiales_agradables':     { color: '#E8935A', nombre: 'Materiales agradables / cálidos' },
+  'miedo_ansiedad':            { color: '#A01F35', nombre: 'Miedo / ansiedad / preocupación' },
+  'sensaciones_agradables':    { color: '#D4847A', nombre: 'Sensaciones agradables / seguridad / calma' },
+  'normalizacion':             { color: '#6BBF8A', nombre: 'Normalización / resignación' },
+  'vivencia_sexual_traumatica':{ color: '#B814E8', nombre: 'Violencia sexual' },
+  'profesional_masculino':     { color: '#9E9E9E', nombre: 'Profesional de salud masculino presente' },
+  'profesional_femenino':      { color: '#F5DD2C', nombre: 'Profesional mujer' }
 };
 
-const NOMBRES = {
-  'frio_metal':           'frío · metal',
-  'materialidad_deseada': 'materialidad deseada',
-  'deseo_especulativo':   'deseo especulativo',
-  'cuerpo_dolor':         'cuerpo · dolor',
-  'invasion':             'invasión',
-  'morgue_muerte':        'morgue · muerte',
-  'intimidad_vinculo':    'intimidad · vínculo',
-  'mecanico':             'mecánico',
-  'organico':             'orgánico · carne',
-  'calor_deseo':          'calor · deseo'
-};
+const filtrosActivos = {};
+for (const cat of Object.keys(CATEGORIAS)) filtrosActivos[cat] = true;
 
 // ============================================================
-// CANVAS
+// CANVAS Y DIMENSIONES
 // ============================================================
 const canvas = document.getElementById('lienzo');
 const ctx = canvas.getContext('2d');
-
 let W = 0, H = 0;
+
+const fluidoCanvas = document.createElement('canvas');
+const fluidoCtx = fluidoCanvas.getContext('2d');
+
+const granoMaskCanvas = document.createElement('canvas');
+const granoMaskCtx = granoMaskCanvas.getContext('2d');
+
+const difusoCanvas = document.createElement('canvas');
+const difusoCtx = difusoCanvas.getContext('2d');
+
+const fondoCanvas = document.createElement('canvas');
+const fondoCtx = fondoCanvas.getContext('2d');
+
+let granoFondoPattern = null;
+let granoColorPattern = null;
+let ultimoFondoAtmosferico = -Infinity;
+
+const MAX_DPR = 1.25;
+const FONDO_ATMOSFERA_INTERVALO = 140;
+const DIFUSION_MOVIL_SCALE = 0.72;
+const GRANO_FONDO_ALPHA = 0.055;
+const GRANO_COLOR_ALPHA = 0.13;
+const GRANO_COLOR_ALPHA_MOVIL = 0.025;
+
 function ajustarCanvas() {
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
   W = window.innerWidth;
   H = window.innerHeight;
   canvas.width = W * dpr;
   canvas.height = H * dpr;
   canvas.style.width = W + 'px';
   canvas.style.height = H + 'px';
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.scale(dpr, dpr);
+
+  fluidoCanvas.width = W * dpr;
+  fluidoCanvas.height = H * dpr;
+  fluidoCtx.setTransform(1, 0, 0, 1, 0, 0);
+  fluidoCtx.scale(dpr, dpr);
+
+  granoMaskCanvas.width = W * dpr;
+  granoMaskCanvas.height = H * dpr;
+  granoMaskCtx.setTransform(1, 0, 0, 1, 0, 0);
+  granoMaskCtx.scale(dpr, dpr);
+
+  difusoCanvas.width = Math.max(1, Math.floor(W * DIFUSION_MOVIL_SCALE));
+  difusoCanvas.height = Math.max(1, Math.floor(H * DIFUSION_MOVIL_SCALE));
+  difusoCtx.setTransform(1, 0, 0, 1, 0, 0);
+  difusoCtx.imageSmoothingEnabled = true;
+
+  fondoCanvas.width = W * dpr;
+  fondoCanvas.height = H * dpr;
+  fondoCtx.setTransform(1, 0, 0, 1, 0, 0);
+  fondoCtx.scale(dpr, dpr);
+
+  granoFondoPattern = null;
+  granoColorPattern = null;
+  ultimoFondoAtmosferico = -Infinity;
 }
 ajustarCanvas();
 window.addEventListener('resize', ajustarCanvas);
 
 // ============================================================
-// MANCHAS — cada voz es una mancha de tinta que se difumina
+// TEXTURA DE GRANO
 // ============================================================
-const manchas = [];
+function generarGrano() {
+  const tam = 220;
+  const c = document.createElement('canvas');
+  c.width = tam;
+  c.height = tam;
+  const cx = c.getContext('2d');
+  const img = cx.createImageData(tam, tam);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const v = 108 + Math.random() * 58;
+    img.data[i]     = v;
+    img.data[i + 1] = v;
+    img.data[i + 2] = v;
+    img.data[i + 3] = 190;
+  }
+  cx.putImageData(img, 0, 0);
+  return c;
+}
+const granoCanvas = generarGrano();
 
-function posicionPorCluster(cluster) {
-  // Cada cluster tiene una zona del campo, con dispersión orgánica
-  const zonas = {
-    'frio_metal':           { x: 0.25, y: 0.35 },
-    'materialidad_deseada': { x: 0.70, y: 0.40 },
-    'deseo_especulativo':   { x: 0.55, y: 0.70 },
-    'cuerpo_dolor':         { x: 0.30, y: 0.65 },
-    'invasion':             { x: 0.45, y: 0.30 },
-    'morgue_muerte':        { x: 0.18, y: 0.55 },
-    'intimidad_vinculo':    { x: 0.78, y: 0.65 },
-    'mecanico':             { x: 0.65, y: 0.25 },
-    'organico':             { x: 0.50, y: 0.55 },
-    'calor_deseo':          { x: 0.70, y: 0.40 }
-  };
-  const zona = zonas[cluster] || { x: 0.5, y: 0.5 };
-  // Dispersión orgánica con distribución gaussiana aproximada
-  const angulo = Math.random() * Math.PI * 2;
-  const radio = (Math.random() + Math.random() + Math.random()) / 3 * 0.18;
+function dibujarHalo(c, x, y, r, colorCentro, colorBorde = 'rgba(0,0,0,0)') {
+  const grd = c.createRadialGradient(x, y, 0, x, y, r);
+  grd.addColorStop(0, colorCentro);
+  grd.addColorStop(0.48, colorCentro.replace(/[\d.]+\)$/u, '0.055)'));
+  grd.addColorStop(1, colorBorde);
+  c.fillStyle = grd;
+  c.fillRect(0, 0, W, H);
+}
+
+function dibujarFondoAtmosferico(c) {
+  const t = tiempoGlobal * 0.001;
+  const pulsoLento = (Math.sin(t * 0.33) + 1) * 0.5;
+  const pulsoProfundo = (Math.sin(t * 0.19 + 1.7) + 1) * 0.5;
+
+  const base = c.createLinearGradient(0, 0, W, H);
+  base.addColorStop(0, '#0a0610');
+  base.addColorStop(0.22, '#12131d');
+  base.addColorStop(0.48, '#150d17');
+  base.addColorStop(0.72, '#071817');
+  base.addColorStop(1, '#13090c');
+  c.globalCompositeOperation = 'source-over';
+  c.globalAlpha = 1;
+  c.fillStyle = base;
+  c.fillRect(0, 0, W, H);
+
+  c.save();
+  c.globalCompositeOperation = 'screen';
+  dibujarHalo(
+    c,
+    W * (0.28 + Math.sin(t * 0.17) * 0.055),
+    H * (0.38 + Math.cos(t * 0.13) * 0.050),
+    Math.max(W, H) * (0.76 + pulsoLento * 0.20),
+    `rgba(32,126,118,${0.22 + pulsoLento * 0.105})`
+  );
+  dibujarHalo(
+    c,
+    W * (0.74 + Math.sin(t * 0.11 + 2.0) * 0.045),
+    H * (0.28 + Math.cos(t * 0.16 + 0.7) * 0.060),
+    Math.max(W, H) * (0.62 + pulsoProfundo * 0.16),
+    `rgba(126,45,92,${0.19 + pulsoProfundo * 0.110})`
+  );
+  dibujarHalo(
+    c,
+    W * (0.48 + Math.sin(t * 0.09 + 3.2) * 0.035),
+    H * (0.82 + Math.cos(t * 0.12 + 2.6) * 0.030),
+    Math.max(W, H) * 0.54,
+    `rgba(202,132,58,${0.105 + pulsoLento * 0.070})`
+  );
+  dibujarHalo(
+    c,
+    W * (0.52 + Math.sin(t * 0.07 + 4.1) * 0.025),
+    H * (0.50 + Math.cos(t * 0.10 + 1.6) * 0.035),
+    Math.max(W, H) * 0.38,
+    `rgba(214,202,145,${0.045 + pulsoProfundo * 0.035})`
+  );
+  c.restore();
+
+  c.save();
+  c.globalCompositeOperation = 'multiply';
+  const vignette = c.createRadialGradient(
+    W / 2, H / 2, Math.min(W, H) * 0.16,
+    W / 2, H / 2, Math.max(W, H) * 0.78
+  );
+  vignette.addColorStop(0, 'rgba(255,255,255,0)');
+  vignette.addColorStop(0.58, 'rgba(36,24,31,0.15)');
+  vignette.addColorStop(1, 'rgba(0,0,0,0.68)');
+  c.fillStyle = vignette;
+  c.fillRect(0, 0, W, H);
+  c.restore();
+
+  if (!granoFondoPattern) granoFondoPattern = c.createPattern(granoCanvas, 'repeat');
+  c.save();
+  c.globalCompositeOperation = 'soft-light';
+  c.globalAlpha = GRANO_FONDO_ALPHA;
+  c.fillStyle = granoFondoPattern;
+  c.fillRect(0, 0, W, H);
+  c.restore();
+}
+
+// ============================================================
+// FACTOR DE MUNDO
+// ============================================================
+let totalRelatos = 64;
+function getWorldFactor() {
+  return Math.sqrt(Math.max(64, totalRelatos) / 64);
+}
+function getWorldRadius() {
+  return 720 * getWorldFactor();
+}
+
+// ============================================================
+// CÁMARA
+// ============================================================
+const cam = {
+  x: 0, y: 0,
+  scale: 0.5,
+  tx: 0, ty: 0,
+  tscale: 0.5,
+  MIN_SCALE: 0.05,
+  MAX_SCALE: 4,
+};
+
+function screenToWorld(sx, sy) {
   return {
-    x: (zona.x + Math.cos(angulo) * radio) * W,
-    y: (zona.y + Math.sin(angulo) * radio) * H
+    x: (sx - W / 2) / cam.scale + cam.x,
+    y: (sy - H / 2) / cam.scale + cam.y,
   };
 }
 
-function nuevaMancha(cluster, edad = 0) {
-  const color = COLORES[cluster] || { r: 150, g: 150, b: 150 };
-  const pos = posicionPorCluster(cluster);
-  return {
-    x: pos.x,
-    y: pos.y,
-    radioObjetivo: 80 + Math.random() * 60,
-    radioActual: 0,
-    color: color,
-    cluster: cluster,
-    nacimiento: performance.now() - edad * 1000,
-    fase: Math.random() * Math.PI * 2,
-    velocidadFase: 0.0005 + Math.random() * 0.0008,
-    derivaX: 0,
-    derivaY: 0,
-    velX: (Math.random() - 0.5) * 0.05,
-    velY: (Math.random() - 0.5) * 0.05
-  };
+function ajustarCamaraInicial() {
+  cam.tx = 0; cam.ty = 0;
+  const vertical = H > W * 1.2;
+  cam.tscale = vertical ? 0.58 : 1.15;
+  cam.x = cam.tx; cam.y = cam.ty; cam.scale = cam.tscale;
 }
 
 // ============================================================
-// LOOP DE ANIMACIÓN
+// GRADIENTES PRE-RENDERIZADOS
 // ============================================================
-let ultimoTiempo = performance.now();
+function hexToRgb(hex) {
+  return {
+    r: parseInt(hex.slice(1, 3), 16),
+    g: parseInt(hex.slice(3, 5), 16),
+    b: parseInt(hex.slice(5, 7), 16),
+  };
+}
 
-function dibujar() {
-  const ahora = performance.now();
-  const dt = ahora - ultimoTiempo;
-  ultimoTiempo = ahora;
+function crearGradienteChispa(rgb) {
+  const tam = 128;
+  const off = document.createElement('canvas');
+  off.width = tam;
+  off.height = tam;
+  const c = off.getContext('2d');
+  const grd = c.createRadialGradient(tam/2, tam/2, 0, tam/2, tam/2, tam/2);
+  grd.addColorStop(0,    `rgba(${rgb.r},${rgb.g},${rgb.b},1.000)`);
+  grd.addColorStop(0.25, `rgba(${rgb.r},${rgb.g},${rgb.b},0.880)`);
+  grd.addColorStop(0.45, `rgba(${rgb.r},${rgb.g},${rgb.b},0.610)`);
+  grd.addColorStop(0.65, `rgba(${rgb.r},${rgb.g},${rgb.b},0.290)`);
+  grd.addColorStop(0.82, `rgba(${rgb.r},${rgb.g},${rgb.b},0.075)`);
+  grd.addColorStop(0.93, `rgba(${rgb.r},${rgb.g},${rgb.b},0.010)`);
+  grd.addColorStop(1,    `rgba(${rgb.r},${rgb.g},${rgb.b},0)`);
+  c.fillStyle = grd;
+  c.fillRect(0, 0, tam, tam);
+  return off;
+}
 
-  // Fondo con leve persistencia (blur acuoso)
-  ctx.fillStyle = 'rgba(5, 5, 5, 0.04)';
-  ctx.fillRect(0, 0, W, H);
+function crearGradienteMancha(rgb) {
+  const tam = 192;
+  const off = document.createElement('canvas');
+  off.width = tam;
+  off.height = tam;
+  const c = off.getContext('2d');
+  const grd = c.createRadialGradient(tam/2, tam/2, 0, tam/2, tam/2, tam/2);
+  grd.addColorStop(0,    `rgba(${rgb.r},${rgb.g},${rgb.b},0.98)`);
+  grd.addColorStop(0.16, `rgba(${rgb.r},${rgb.g},${rgb.b},0.82)`);
+  grd.addColorStop(0.34, `rgba(${rgb.r},${rgb.g},${rgb.b},0.48)`);
+  grd.addColorStop(0.58, `rgba(${rgb.r},${rgb.g},${rgb.b},0.15)`);
+  grd.addColorStop(1,    `rgba(${rgb.r},${rgb.g},${rgb.b},0)`);
+  c.fillStyle = grd;
+  c.fillRect(0, 0, tam, tam);
+  return off;
+}
 
-  // Dibujar cada mancha
-  manchas.forEach(m => {
-    // Crecimiento del radio hacia su objetivo
-    if (m.radioActual < m.radioObjetivo) {
-      m.radioActual += (m.radioObjetivo - m.radioActual) * 0.015;
+const gradChispa = {};
+const gradMancha = {};
+for (const [cat, info] of Object.entries(CATEGORIAS)) {
+  const rgb = hexToRgb(info.color);
+  gradChispa[cat] = crearGradienteChispa(rgb);
+  gradMancha[cat] = crearGradienteMancha(rgb);
+}
+
+// ============================================================
+// PINTITA
+// ============================================================
+const BLOB_RADIO_BASE = 19;
+const BLOB_ALPHA = 0.42;
+const BLUR_PX = 12;
+const CONTRAST_AMOUNT = 3.35;
+const RADIO_CHISPA = 16;
+const OPACIDAD_CHISPA = 0.28;
+const DURACION_AGITACION = 2800;
+const DURACION_INTEGRACION = 9000;
+
+const COHESION_DIST = 245;
+const COHESION_FUERZA = 0.00055;
+const REPULSION_CERCANA_DIST = 32;
+const REPULSION_CERCANA_FUERZA = 0.046;
+const SEPARACION_SUAVE_DIST = 96;
+const SEPARACION_SUAVE_FUERZA = 0.0028;
+const FLUJO_ORGANICO_FUERZA = 0.018;
+const ORBITA_FUERZA = 0.0045;
+
+function escalaVisualMovil() {
+  return H > W * 1.2 ? 1.06 : 1;
+}
+
+function usarDifusionMovil() {
+  return H > W * 1.2 || /iPad|iPhone|iPod/.test(navigator.userAgent);
+}
+
+class Pintita {
+  constructor(id, respId, cat, esNueva = false) {
+    this.id = id;
+    this.respuestaId = respId;
+    this.categoria = cat;
+    this.colorVisual = CATEGORIAS[cat]?.color || '#888888';
+    this.gradChispa = gradChispa[cat] || crearGradienteChispa(hexToRgb('#888888'));
+    this.gradMancha = gradMancha[cat] || crearGradienteMancha(hexToRgb('#888888'));
+
+    const tamRand = Math.pow(Math.random(), 0.7);
+    this.tamFactor = 0.55 + tamRand * 1.95;
+    this.opacFactor = 0.78 + Math.random() * 0.5;
+
+    this.brushAngle = Math.random() * Math.PI * 2;
+    this.brushAngleVel = (Math.random() - 0.5) * 0.00040;
+    const elongation = 0.9 + Math.random() * 1.9;
+    this.particles = [];
+    const nP = 6 + Math.floor(Math.random() * 5);
+    for (let i = 0; i < nP; i++) {
+      const t = nP > 1 ? (i / (nP - 1) - 0.5) * 1.6 : 0;
+      const radial = Math.pow(Math.random(), 0.72) * 0.85;
+      const a = Math.random() * Math.PI * 2;
+      this.particles.push({
+        along: t * elongation + Math.cos(a) * radial * 0.72,
+        perp: (Math.random() - 0.5) * 0.60 + Math.sin(a) * radial,
+        size: 0.40 + Math.random() * 0.62,
+        aspect: 0.68 + Math.random() * 1.34,
+        rot: Math.random() * Math.PI * 2,
+        alpha: 0.78 + Math.random() * 0.42,
+      });
     }
 
-    // Respiración sutil (oscilación del radio)
-    m.fase += m.velocidadFase * dt;
-    const respira = Math.sin(m.fase) * 8;
-    const radio = Math.max(1, m.radioActual + respira);
+    const maxR = getWorldRadius();
+    const angulo = Math.random() * Math.PI * 2;
+    const radio = Math.sqrt(Math.random()) * maxR * 0.75;
+    this.x = Math.cos(angulo) * radio;
+    this.y = Math.sin(angulo) * radio;
+    this.vx = (Math.random() - 0.5) * 0.5;
+    this.vy = (Math.random() - 0.5) * 0.5;
 
-    // Deriva muy lenta (movimiento orgánico)
-    m.derivaX += m.velX;
-    m.derivaY += m.velY;
-    m.velX += (Math.random() - 0.5) * 0.002;
-    m.velY += (Math.random() - 0.5) * 0.002;
-    m.velX *= 0.99;
-    m.velY *= 0.99;
+    if (esNueva) {
+      const a = Math.random() * Math.PI * 2;
+      const r = maxR * 1.1;
+      this.x = Math.cos(a) * r;
+      this.y = Math.sin(a) * r;
+    }
 
-    const x = m.x + m.derivaX;
-    const y = m.y + m.derivaY;
+    this.opacidadFiltro = 1;
+    this.opacidadFiltroObjetivo = filtrosActivos[cat] ? 1 : 0;
+    this.fase = Math.random() * Math.PI * 2;
+    this.velFase = 0.0005 + Math.random() * 0.001;
+    this.tiempoAgitacion = 0;
+    this.edad = esNueva ? 0 : DURACION_INTEGRACION + 1;
+  }
 
-    // Mancha: gradiente radial con alpha bajo, capas múltiples
-    const grad = ctx.createRadialGradient(x, y, 0, x, y, radio);
-    grad.addColorStop(0,   `rgba(${m.color.r}, ${m.color.g}, ${m.color.b}, 0.18)`);
-    grad.addColorStop(0.4, `rgba(${m.color.r}, ${m.color.g}, ${m.color.b}, 0.10)`);
-    grad.addColorStop(0.8, `rgba(${m.color.r}, ${m.color.g}, ${m.color.b}, 0.03)`);
-    grad.addColorStop(1,   `rgba(${m.color.r}, ${m.color.g}, ${m.color.b}, 0)`);
+  actualizar(dt, hwx, hwy, mouseVel, vecinos, isDragging, input) {
+    this.edad += dt;
+    this.fase += this.velFase * dt;
+    this.brushAngle += this.brushAngleVel * dt;
 
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.arc(x, y, radio, 0, Math.PI * 2);
-    ctx.fill();
+    if (this.tiempoAgitacion > 0)
+      this.tiempoAgitacion = Math.max(0, this.tiempoAgitacion - dt);
+
+    let ax = 0, ay = 0;
+    let crowdCx = 0, crowdCy = 0, crowdN = 0;
+    const CROWD_DIST = 85;
+    const CROWD_DIST2 = CROWD_DIST * CROWD_DIST;
+
+    for (const o of vecinos) {
+      if (o === this) continue;
+      const dx = o.x - this.x;
+      const dy = o.y - this.y;
+      const dist2 = dx * dx + dy * dy;
+      if (dist2 < 0.1) continue;
+      const dist = Math.sqrt(dist2);
+
+      if (dist2 < CROWD_DIST2) {
+        crowdCx += o.x;
+        crowdCy += o.y;
+        crowdN++;
+      }
+
+      if (dist < COHESION_DIST && dist > SEPARACION_SUAVE_DIST) {
+        const f = COHESION_FUERZA * (1 - dist / COHESION_DIST);
+        ax += (dx / dist) * f;
+        ay += (dy / dist) * f;
+      }
+      if (dist < SEPARACION_SUAVE_DIST) {
+        const f = SEPARACION_SUAVE_FUERZA * (SEPARACION_SUAVE_DIST - dist) / SEPARACION_SUAVE_DIST;
+        ax -= (dx / dist) * f;
+        ay -= (dy / dist) * f;
+      }
+      if (dist < REPULSION_CERCANA_DIST) {
+        const f = REPULSION_CERCANA_FUERZA * (REPULSION_CERCANA_DIST - dist) / REPULSION_CERCANA_DIST;
+        ax -= (dx / dist) * f;
+        ay -= (dy / dist) * f;
+      }
+    }
+
+    const CROWD_UMBRAL = 14;
+    if (crowdN > CROWD_UMBRAL) {
+      crowdCx /= crowdN;
+      crowdCy /= crowdN;
+      let dxC = this.x - crowdCx;
+      let dyC = this.y - crowdCy;
+      let dC = Math.sqrt(dxC * dxC + dyC * dyC);
+      if (dC < 1) {
+        const a = Math.random() * Math.PI * 2;
+        dxC = Math.cos(a); dyC = Math.sin(a); dC = 1;
+      }
+      const fPresion = (crowdN - CROWD_UMBRAL) * 0.0022;
+      ax += (dxC / dC) * fPresion;
+      ay += (dyC / dC) * fPresion;
+    }
+
+    if (input?.activo && input.x !== null) {
+      const dx = this.x - input.x;
+      const dy = this.y - input.y;
+      const dist2 = dx * dx + dy * dy;
+      const rInfl = (190 + input.mezcla * 135 + input.dispersion * 95) / Math.max(0.1, cam.scale);
+      if (dist2 < rInfl * rInfl && dist2 > 1) {
+        const dist = Math.sqrt(dist2);
+        const fd = (rInfl - dist) / rInfl;
+        const invDistX = dx / dist;
+        const invDistY = dy / dist;
+
+        const disper = input.dispersion * fd * 0.62;
+        ax += invDistX * disper;
+        ay += invDistY * disper;
+
+        const mezcla = input.presionado ? input.mezcla * fd : 0;
+        ax -= invDistX * mezcla * 0.045;
+        ay -= invDistY * mezcla * 0.045;
+        ax += input.vx * mezcla * 0.018;
+        ay += input.vy * mezcla * 0.018;
+
+        const remolino = mezcla * 0.060 * Math.sin(this.fase + tiempoGlobal * 0.002);
+        ax += -invDistY * remolino;
+        ay += invDistX * remolino;
+
+        if (disper > 0.04) this.tiempoAgitacion = DURACION_AGITACION;
+      }
+    }
+
+    const distCentro = Math.sqrt(this.x * this.x + this.y * this.y);
+    const maxR = getWorldRadius();
+    if (distCentro > maxR * 1.2 && distCentro > 0.1) {
+      const exceso = distCentro - maxR * 1.2;
+      const pull = exceso * 0.0006;
+      ax -= (this.x / distCentro) * pull;
+      ay -= (this.y / distCentro) * pull;
+    }
+
+    const wsLento = 0.0024, wtLento = 0.00018;
+    const wsRapid = 0.0085, wtRapid = 0.00042;
+    const windX =
+      Math.sin(this.x * wsLento + tiempoGlobal * wtLento) * 0.70 +
+      Math.sin(this.x * wsRapid + this.y * 0.005 + tiempoGlobal * wtRapid + 1.3) * 0.30;
+    const windY =
+      Math.cos(this.y * wsLento + tiempoGlobal * wtLento * 1.13) * 0.70 +
+      Math.cos(this.y * wsRapid + this.x * 0.005 + tiempoGlobal * wtRapid * 1.21 + 0.7) * 0.30;
+    const flujoX =
+      windX +
+      Math.sin((this.y - this.x) * 0.0038 + tiempoGlobal * 0.00031) * 0.55 +
+      Math.cos(this.y * 0.010 + tiempoGlobal * 0.00023 + this.fase) * 0.22;
+    const flujoY =
+      windY +
+      Math.cos((this.x + this.y) * 0.0032 + tiempoGlobal * 0.00029) * 0.55 +
+      Math.sin(this.x * 0.010 + tiempoGlobal * 0.00025 + this.fase) * 0.22;
+    ax += flujoX * FLUJO_ORGANICO_FUERZA;
+    ay += flujoY * FLUJO_ORGANICO_FUERZA;
+
+    if (distCentro > 8) {
+      const giro = Math.sin(tiempoGlobal * 0.00018 + distCentro * 0.006) * ORBITA_FUERZA;
+      ax += (-this.y / distCentro) * giro;
+      ay += (this.x / distCentro) * giro;
+    }
+
+    ax += (Math.random() - 0.5) * 0.010;
+    ay += (Math.random() - 0.5) * 0.010;
+
+    const accMax = 0.08;
+    const a2 = ax * ax + ay * ay;
+    if (a2 > accMax * accMax) {
+      const a = Math.sqrt(a2);
+      ax = (ax / a) * accMax;
+      ay = (ay / a) * accMax;
+    }
+
+    this.vx = (this.vx + ax) * 0.982;
+    this.vy = (this.vy + ay) * 0.982;
+
+    const velMax = 1.9;
+    const v2 = this.vx * this.vx + this.vy * this.vy;
+    if (v2 > velMax * velMax) {
+      const v = Math.sqrt(v2);
+      this.vx = (this.vx / v) * velMax;
+      this.vy = (this.vy / v) * velMax;
+    }
+
+    this.x += this.vx;
+    this.y += this.vy;
+
+    this.opacidadFiltro += (this.opacidadFiltroObjetivo - this.opacidadFiltro) * 0.05;
+  }
+
+  contieneEnMundo(wx, wy) {
+    const dx = wx - this.x;
+    const dy = wy - this.y;
+    const r = BLOB_RADIO_BASE * escalaVisualMovil() * this.tamFactor * 1.4;
+    return dx * dx + dy * dy < r * r;
+  }
+}
+
+// ============================================================
+// SPATIAL HASH
+// ============================================================
+const CELL_SIZE = 360;
+let spatialHash = new Map();
+
+function rebuildSpatialHash() {
+  spatialHash.clear();
+  for (const p of pintitas) {
+    const cx = Math.floor(p.x / CELL_SIZE);
+    const cy = Math.floor(p.y / CELL_SIZE);
+    const key = cx * 100000 + cy;
+    let cell = spatialHash.get(key);
+    if (!cell) { cell = []; spatialHash.set(key, cell); }
+    cell.push(p);
+  }
+}
+
+function getVecinos(x, y) {
+  const cx = Math.floor(x / CELL_SIZE);
+  const cy = Math.floor(y / CELL_SIZE);
+  const vecinos = [];
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      const key = (cx + dx) * 100000 + (cy + dy);
+      const cell = spatialHash.get(key);
+      if (cell) vecinos.push(...cell);
+    }
+  }
+  return vecinos;
+}
+
+// ============================================================
+// ESTADO GLOBAL
+// ============================================================
+const pintitas = [];
+const pintitasMap = new Map();
+
+let tiempoGlobal = 0;
+let ultimoTiempo = performance.now();
+
+let mouseVel = 0;
+let mousePrevX = null, mousePrevY = null;
+let ultimoMouseTime = performance.now();
+let hoverWorldX = null, hoverWorldY = null;
+
+const gesto = {
+  activo: false,
+  x: null, y: null,
+  vx: 0, vy: 0,
+  speed: 0,
+  path: 0,
+  direct: 0,
+  jitter: 0,
+  mezcla: 0,
+  dispersion: 0,
+  presionado: false,
+  ultimoT: performance.now(),
+  inicioX: null, inicioY: null,
+  prevX: null, prevY: null,
+  prevDirX: 0, prevDirY: 0,
+};
+
+let isDragging = false;
+let dragStartSX = 0, dragStartSY = 0;
+let dragDistance = 0;
+
+function actualizarGesto(sx, sy, activo = true, presionado = false) {
+  const ahora = performance.now();
+  const w = screenToWorld(sx, sy);
+  const dt = Math.max(1, ahora - gesto.ultimoT);
+
+  if (!gesto.activo || gesto.prevX === null || !activo) {
+    gesto.activo = activo;
+    gesto.presionado = presionado;
+    gesto.x = w.x; gesto.y = w.y;
+    gesto.prevX = w.x; gesto.prevY = w.y;
+    gesto.inicioX = w.x; gesto.inicioY = w.y;
+    gesto.vx = 0; gesto.vy = 0;
+    gesto.speed = 0; gesto.path = 0; gesto.direct = 0;
+    gesto.jitter *= 0.8;
+    gesto.mezcla *= 0.8;
+    gesto.dispersion *= 0.8;
+    gesto.ultimoT = ahora;
+    return w;
+  }
+
+  const dx = w.x - gesto.prevX;
+  const dy = w.y - gesto.prevY;
+  const d = Math.sqrt(dx * dx + dy * dy);
+  const speed = d / dt * 1000;
+  const dirX = d > 0.001 ? dx / d : gesto.prevDirX;
+  const dirY = d > 0.001 ? dy / d : gesto.prevDirY;
+  const giro = 1 - Math.max(-1, Math.min(1, dirX * gesto.prevDirX + dirY * gesto.prevDirY));
+
+  gesto.path = Math.min(900, gesto.path * 0.985 + d);
+  gesto.direct = Math.sqrt((w.x - gesto.inicioX) ** 2 + (w.y - gesto.inicioY) ** 2);
+  gesto.jitter = Math.min(1, gesto.jitter * 0.88 + giro * Math.min(1, speed / 520) * 0.55);
+  const mezclaGestual = presionado
+    ? Math.min(1, gesto.path / 360) * (1 - gesto.jitter * 0.72) * 0.095
+    : 0;
+  const sacudidaMouse = presionado ? 0 : Math.max(0, Math.min(1, (speed - 520) / 720)) * 0.16;
+  gesto.mezcla = Math.min(1, gesto.mezcla * 0.93 + mezclaGestual);
+  gesto.dispersion = Math.min(1, gesto.dispersion * 0.88 + gesto.jitter * Math.min(1, speed / 420) * 0.18 + sacudidaMouse);
+  gesto.x = w.x; gesto.y = w.y;
+  gesto.vx = dx / dt * 16.67;
+  gesto.vy = dy / dt * 16.67;
+  gesto.speed = speed;
+  gesto.prevX = w.x; gesto.prevY = w.y;
+  gesto.prevDirX = dirX; gesto.prevDirY = dirY;
+  gesto.presionado = presionado;
+  gesto.ultimoT = ahora;
+  return w;
+}
+
+function soltarGesto() {
+  gesto.activo = false;
+  gesto.prevX = null;
+  gesto.prevY = null;
+  gesto.path = 0;
+  gesto.direct = 0;
+  gesto.presionado = false;
+}
+
+// ============================================================
+// RENDER LOOP
+// ============================================================
+function render() {
+  const ahora = performance.now();
+  const dt = Math.min(50, ahora - ultimoTiempo);
+  ultimoTiempo = ahora;
+  tiempoGlobal += dt;
+
+  const lerp = 0.12;
+  cam.x += (cam.tx - cam.x) * lerp;
+  cam.y += (cam.ty - cam.y) * lerp;
+  cam.scale += (cam.tscale - cam.scale) * lerp;
+
+  mouseVel *= Math.pow(0.92, dt / 16);
+  const decay = Math.pow(0.92, dt / 16);
+  gesto.mezcla *= decay;
+  gesto.dispersion *= decay;
+  gesto.jitter *= Math.pow(0.90, dt / 16);
+
+  const resp = Math.sin(tiempoGlobal * 0.00045);
+
+  rebuildSpatialHash();
+  for (const p of pintitas) {
+    const vecinos = getVecinos(p.x, p.y);
+    p.actualizar(dt, hoverWorldX, hoverWorldY, mouseVel, vecinos, isDragging, gesto);
+  }
+
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.clearRect(0, 0, W, H);
+  if (tiempoGlobal - ultimoFondoAtmosferico > FONDO_ATMOSFERA_INTERVALO) {
+    fondoCtx.clearRect(0, 0, W, H);
+    dibujarFondoAtmosferico(fondoCtx);
+    ultimoFondoAtmosferico = tiempoGlobal;
+  }
+  ctx.drawImage(fondoCanvas, 0, 0, W, H);
+
+  // CAPA 1: METABALL FLUIDO
+  fluidoCtx.clearRect(0, 0, W, H);
+  fluidoCtx.globalCompositeOperation = 'source-over';
+
+  for (const p of pintitas) {
+    if (p.opacidadFiltro < 0.005) continue;
+
+    const sx = (p.x - cam.x) * cam.scale + W / 2;
+    const sy = (p.y - cam.y) * cam.scale + H / 2;
+
+    const escalaResp = Math.sqrt(p.tamFactor);
+    const respProp = Math.sin(p.fase) * 0.9 * escalaResp;
+    const respGlob = resp * 1.2 * escalaResp;
+    const radioMundo = BLOB_RADIO_BASE * escalaVisualMovil() * p.tamFactor + respProp + respGlob;
+    const sr = radioMundo * cam.scale;
+
+    const cullMargin = sr * 4 + 40;
+    if (sr < 0.3) continue;
+    if (sx + cullMargin < 0 || sx - cullMargin > W) continue;
+    if (sy + cullMargin < 0 || sy - cullMargin > H) continue;
+
+    const fade = Math.min(1, p.edad / 4500);
+    const alphaBase = BLOB_ALPHA * fade * p.opacidadFiltro * p.opacFactor;
+
+    const cosA = Math.cos(p.brushAngle);
+    const sinA = Math.sin(p.brushAngle);
+    const movil = usarDifusionMovil();
+    for (const part of p.particles) {
+      const px = sx + (part.along * cosA - part.perp * sinA) * sr;
+      const py = sy + (part.along * sinA + part.perp * cosA) * sr;
+      const psize = Math.max(0.5, part.size * sr * 0.85);
+      const drawR = psize * (movil ? 1.95 : 2.10);
+      fluidoCtx.save();
+      fluidoCtx.globalAlpha = alphaBase * part.alpha;
+      fluidoCtx.translate(px, py);
+      fluidoCtx.rotate(p.brushAngle + part.rot);
+      fluidoCtx.scale(part.aspect, 1);
+      fluidoCtx.drawImage(p.gradMancha, -drawR, -drawR, drawR * 2, drawR * 2);
+      fluidoCtx.restore();
+    }
+  }
+  fluidoCtx.globalAlpha = 1;
+
+  if (usarDifusionMovil()) {
+    difusoCtx.clearRect(0, 0, difusoCanvas.width, difusoCanvas.height);
+    difusoCtx.globalAlpha = 1;
+    difusoCtx.drawImage(fluidoCanvas, 0, 0, difusoCanvas.width, difusoCanvas.height);
+    ctx.imageSmoothingEnabled = true;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 0.26;
+    ctx.drawImage(difusoCanvas, 0, 0, W, H);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.drawImage(fluidoCanvas, 0, 0, W, H);
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = 0.045;
+    ctx.drawImage(fluidoCanvas, 0, 0, W, H);
+    ctx.globalAlpha = 1;
+  } else {
+    const blur = Math.min(60, Math.max(3, BLUR_PX * cam.scale));
+    ctx.filter = `blur(${blur}px) contrast(${CONTRAST_AMOUNT})`;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.drawImage(fluidoCanvas, 0, 0, W, H);
+    ctx.filter = 'none';
+  }
+
+  // CAPA INTERMEDIA: grano enmascarado solo a zonas de color
+  if (!granoColorPattern) granoColorPattern = granoMaskCtx.createPattern(granoCanvas, 'repeat');
+  granoMaskCtx.globalCompositeOperation = 'source-over';
+  granoMaskCtx.fillStyle = granoColorPattern;
+  granoMaskCtx.fillRect(0, 0, W, H);
+  granoMaskCtx.globalCompositeOperation = 'destination-in';
+  granoMaskCtx.drawImage(fluidoCanvas, 0, 0, W, H);
+
+  ctx.globalCompositeOperation = 'soft-light';
+  ctx.globalAlpha = usarDifusionMovil() ? GRANO_COLOR_ALPHA_MOVIL : GRANO_COLOR_ALPHA;
+  ctx.drawImage(granoMaskCanvas, 0, 0, W, H);
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+
+  // CAPA 2: CHISPAS
+  ctx.globalCompositeOperation = 'source-over';
+  for (const p of pintitas) {
+    if (p.opacidadFiltro < 0.005) continue;
+    const fAgit = p.tiempoAgitacion / DURACION_AGITACION;
+    const fEdad = Math.max(0, 1 - p.edad / DURACION_INTEGRACION);
+    const chispa = Math.max(fAgit, fEdad * 0.85);
+    if (chispa < 0.03) continue;
+
+    const sx = (p.x - cam.x) * cam.scale + W / 2;
+    const sy = (p.y - cam.y) * cam.scale + H / 2;
+    const escalaResp = Math.sqrt(p.tamFactor);
+    const radioChispa = RADIO_CHISPA * escalaResp * cam.scale;
+
+    if (sx + radioChispa < 0 || sx - radioChispa > W) continue;
+    if (sy + radioChispa < 0 || sy - radioChispa > H) continue;
+
+    ctx.globalAlpha = OPACIDAD_CHISPA * chispa * p.opacidadFiltro;
+    ctx.drawImage(p.gradChispa,
+      sx - radioChispa, sy - radioChispa,
+      radioChispa * 2, radioChispa * 2);
+  }
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+
+  requestAnimationFrame(render);
+}
+requestAnimationFrame(render);
+
+// ============================================================
+// CONTROLES
+// ============================================================
+
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  const sx = e.clientX - rect.left;
+  const sy = e.clientY - rect.top;
+
+  if (e.ctrlKey || e.metaKey) {
+    const factor = Math.exp(-e.deltaY * 0.012);
+    const newScale = Math.max(cam.MIN_SCALE, Math.min(cam.MAX_SCALE, cam.tscale * factor));
+    const wx = (sx - W / 2) / cam.tscale + cam.tx;
+    const wy = (sy - H / 2) / cam.tscale + cam.ty;
+
+    cam.tscale = newScale;
+    cam.tx = wx - (sx - W / 2) / newScale;
+    cam.ty = wy - (sy - H / 2) / newScale;
+    return;
+  }
+
+  const horizontal = e.shiftKey && Math.abs(e.deltaX) < Math.abs(e.deltaY)
+    ? e.deltaY
+    : e.deltaX;
+  cam.tx += horizontal / cam.scale;
+  cam.ty += e.deltaY / cam.scale;
+  cam.x = cam.tx;
+  cam.y = cam.ty;
+}, { passive: false });
+
+canvas.addEventListener('mousedown', (e) => {
+  isDragging = true;
+  dragDistance = 0;
+  dragStartSX = e.clientX;
+  dragStartSY = e.clientY;
+  const rect = canvas.getBoundingClientRect();
+  const w = actualizarGesto(e.clientX - rect.left, e.clientY - rect.top, true, true);
+  hoverWorldX = w.x; hoverWorldY = w.y;
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const sx = e.clientX - rect.left;
+  const sy = e.clientY - rect.top;
+
+  if (isDragging) {
+    const dx = e.clientX - dragStartSX;
+    const dy = e.clientY - dragStartSY;
+    dragDistance += Math.abs(dx) + Math.abs(dy);
+    dragStartSX = e.clientX;
+    dragStartSY = e.clientY;
+    const w = actualizarGesto(sx, sy, true, true);
+    hoverWorldX = w.x; hoverWorldY = w.y;
+  } else {
+    if (mousePrevX !== null) {
+      const t = performance.now();
+      const ddt = Math.max(1, t - ultimoMouseTime);
+      const vdx = sx - mousePrevX, vdy = sy - mousePrevY;
+      const v = Math.sqrt(vdx * vdx + vdy * vdy) / ddt * 1000;
+      mouseVel = mouseVel * 0.6 + v * 0.4;
+      ultimoMouseTime = t;
+    }
+    mousePrevX = sx; mousePrevY = sy;
+    const w = actualizarGesto(sx, sy, true, false);
+    hoverWorldX = w.x; hoverWorldY = w.y;
+  }
+});
+
+canvas.addEventListener('mouseup', async (e) => {
+  isDragging = false;
+  if (dragDistance < 6) {
+    const rect = canvas.getBoundingClientRect();
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
+    const w = screenToWorld(sx, sy);
+    let target = null, best = Infinity;
+    for (const p of pintitas) {
+      if (p.contieneEnMundo(w.x, w.y)) {
+        const dx = w.x - p.x, dy = w.y - p.y;
+        const d = dx * dx + dy * dy;
+        if (d < best) { best = d; target = p; }
+      }
+    }
+    if (target) await abrirRelato(target.respuestaId);
+  }
+  soltarGesto();
+});
+
+canvas.addEventListener('mouseleave', () => {
+  isDragging = false;
+  hoverWorldX = null;
+  hoverWorldY = null;
+  mouseVel = 0;
+  soltarGesto();
+});
+
+let lastPinchDist = 0;
+let pinchActivo = false;
+let touchPanStartX = 0, touchPanStartY = 0;
+let touchPanLastX = 0, touchPanLastY = 0;
+let touchDragDist = 0;
+
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  pinchActivo = e.touches.length >= 2;
+  touchDragDist = 0;
+
+  if (e.touches.length === 1) {
+    const t = e.touches[0];
+    touchPanStartX = t.clientX;
+    touchPanStartY = t.clientY;
+    touchPanLastX = t.clientX;
+    touchPanLastY = t.clientY;
+    isDragging = false;
+    const rect = canvas.getBoundingClientRect();
+    const w = actualizarGesto(t.clientX - rect.left, t.clientY - rect.top, true, true);
+    hoverWorldX = w.x; hoverWorldY = w.y;
+    prepararMovimientoCelular();
+  } else if (e.touches.length >= 2) {
+    soltarGesto();
+    const t1 = e.touches[0], t2 = e.touches[1];
+    const dx = t2.clientX - t1.clientX, dy = t2.clientY - t1.clientY;
+    lastPinchDist = Math.sqrt(dx * dx + dy * dy);
+    isDragging = false;
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+
+  if (e.touches.length >= 2) {
+    pinchActivo = true;
+    isDragging = false;
+    const t1 = e.touches[0], t2 = e.touches[1];
+    const dx = t2.clientX - t1.clientX, dy = t2.clientY - t1.clientY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const factor = dist / lastPinchDist;
+    const newScale = Math.max(cam.MIN_SCALE, Math.min(cam.MAX_SCALE, cam.tscale * factor));
+    const cx = (t1.clientX + t2.clientX) / 2;
+    const cy = (t1.clientY + t2.clientY) / 2;
+    const wx = (cx - W / 2) / cam.tscale + cam.tx;
+    const wy = (cy - H / 2) / cam.tscale + cam.ty;
+    cam.tscale = newScale;
+    cam.tx = wx - (cx - W / 2) / newScale;
+    cam.ty = wy - (cy - H / 2) / newScale;
+    lastPinchDist = dist;
+  } else if (e.touches.length === 1 && !pinchActivo) {
+    const t = e.touches[0];
+    const dx = t.clientX - touchPanLastX;
+    const dy = t.clientY - touchPanLastY;
+    touchDragDist += Math.abs(dx) + Math.abs(dy);
+
+    touchPanLastX = t.clientX;
+    touchPanLastY = t.clientY;
+
+    const rect = canvas.getBoundingClientRect();
+    const sx = t.clientX - rect.left;
+    const sy = t.clientY - rect.top;
+    if (mousePrevX !== null) {
+      const ahora = performance.now();
+      const ddt = Math.max(1, ahora - ultimoMouseTime);
+      const vdx = sx - mousePrevX, vdy = sy - mousePrevY;
+      const v = Math.sqrt(vdx * vdx + vdy * vdy) / ddt * 1000;
+      mouseVel = mouseVel * 0.6 + v * 0.4;
+      ultimoMouseTime = ahora;
+    }
+    mousePrevX = sx; mousePrevY = sy;
+    const wp = actualizarGesto(sx, sy, true, true);
+    hoverWorldX = wp.x; hoverWorldY = wp.y;
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchend', async (e) => {
+  if (e.touches.length === 0) {
+    if (!pinchActivo && touchDragDist < 10) {
+      const rect = canvas.getBoundingClientRect();
+      const sx = touchPanStartX - rect.left;
+      const sy = touchPanStartY - rect.top;
+      const w = screenToWorld(sx, sy);
+      let target = null, best = Infinity;
+      for (const p of pintitas) {
+        if (p.contieneEnMundo(w.x, w.y)) {
+          const dx = w.x - p.x, dy = w.y - p.y;
+          const d = dx * dx + dy * dy;
+          if (d < best) { best = d; target = p; }
+        }
+      }
+      if (target) await abrirRelato(target.respuestaId);
+    }
+    pinchActivo = false;
+    isDragging = false;
+    soltarGesto();
+  } else if (e.touches.length === 1 && pinchActivo) {
+    const t = e.touches[0];
+    touchPanStartX = t.clientX;
+    touchPanStartY = t.clientY;
+    touchPanLastX = t.clientX;
+    touchPanLastY = t.clientY;
+    touchDragDist = 100;
+    pinchActivo = false;
+    isDragging = false;
+    const rect = canvas.getBoundingClientRect();
+    const w = actualizarGesto(t.clientX - rect.left, t.clientY - rect.top, true, true);
+    hoverWorldX = w.x; hoverWorldY = w.y;
+  }
+}, { passive: false });
+
+// ============================================================
+// MODAL
+// ============================================================
+async function abrirRelato(respuestaId) {
+  try {
+    const res = await fetch(`${API_BASE}/relato/${respuestaId}`);
+    const data = await res.json();
+    if (data.status === 'error') return;
+    document.getElementById('modal-texto').textContent = data.relato || '(sin contenido)';
+    const cats = data.categorias_activadas || {};
+    document.getElementById('modal-cats').innerHTML = Object.keys(cats).map(cat => {
+      const info = CATEGORIAS[cat] || { color: '#888', nombre: cat };
+      return `<span class="modal-cat-chip" style="background:${info.color}">${info.nombre}</span>`;
+    }).join('');
+    document.getElementById('modal').classList.add('activo');
+  } catch(e) { console.error(e); }
+}
+function cerrarModal() { document.getElementById('modal').classList.remove('activo'); }
+document.getElementById('modal').addEventListener('click', (e) => {
+  if (e.target.id === 'modal') cerrarModal();
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') cerrarModal(); });
+
+// ============================================================
+// LEYENDA
+// ============================================================
+function clickCategoria(cat, soloEsta) {
+  if (soloEsta) {
+    const yaEsSolo = filtrosActivos[cat] &&
+      Object.entries(filtrosActivos).every(([k, v]) => k === cat ? v : !v);
+    if (yaEsSolo) {
+      for (const k of Object.keys(filtrosActivos)) filtrosActivos[k] = true;
+    } else {
+      for (const k of Object.keys(filtrosActivos)) filtrosActivos[k] = (k === cat);
+    }
+  } else {
+    filtrosActivos[cat] = !filtrosActivos[cat];
+  }
+  for (const p of pintitas) {
+    p.opacidadFiltroObjetivo = filtrosActivos[p.categoria] ? 1 : 0;
+  }
+  actualizarLeyenda();
+}
+
+function actualizarLeyenda() {
+  const cont = document.getElementById('leyenda');
+  cont.innerHTML = Object.entries(CATEGORIAS).map(([k, v]) => {
+    const cls = filtrosActivos[k] ? '' : ' apagado';
+    return `<div class="leyenda-item${cls}" data-cat="${k}" role="button" tabindex="0" title="Click: ocultar · Shift+click: aislar">
+      <span class="leyenda-dot" style="background:${v.color}"></span>${v.nombre}
+    </div>`;
+  }).join('');
+  cont.querySelectorAll('.leyenda-item').forEach(el => {
+    el.addEventListener('click', (e) => clickCategoria(el.dataset.cat, e.shiftKey));
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault(); clickCategoria(el.dataset.cat, e.shiftKey);
+      }
+    });
   });
-
-  requestAnimationFrame(dibujar);
 }
-requestAnimationFrame(dibujar);
-
-// ============================================================
-// PALABRAS FLOTANTES
-// ============================================================
-function mostrarPalabra(texto, cluster) {
-  if (!texto) return;
-  const palabra = document.createElement('div');
-  palabra.className = 'palabra-flotante';
-  palabra.textContent = texto;
-
-  const pos = posicionPorCluster(cluster);
-  palabra.style.left = (pos.x - 60) + 'px';
-  palabra.style.top = pos.y + 'px';
-
-  document.body.appendChild(palabra);
-  setTimeout(() => palabra.remove(), 6500);
-}
-
-// Extraer una palabra significativa del texto
-function extraerPalabraClave(texto) {
-  if (!texto) return null;
-  const palabras = texto.toLowerCase()
-    .replace(/[.,;:!?¿¡()]/g, '')
-    .split(/\s+/)
-    .filter(p => p.length > 4);
-  // Priorizar palabras del vocabulario somático
-  const interesantes = ['frío','dolor','metal','helado','invasión','vergüenza','miedo',
-    'morgue','ganado','abrelatas','sacacorcho','castigo','silicona','tibio','suave',
-    'descuartizar','carnicería','ultraje','animal','cuchillo','tornillo','chirrido'];
-  const encontrada = palabras.find(p => interesantes.some(i => p.includes(i)));
-  if (encontrada) return encontrada;
-  return palabras[Math.floor(Math.random() * palabras.length)] || null;
-}
+actualizarLeyenda();
 
 // ============================================================
 // CONEXIÓN AL SERVIDOR
 // ============================================================
-const API = 'https://especuloar-servidor.onrender.com/estado';
-let ultimoTotal = 0;
-let inicializado = false;
+let ultimaPintitaId = 0;
 
-async function consultar() {
+async function inicializar() {
   try {
-    const res = await fetch(API);
+    const res = await fetch(`${API_BASE}/pintitas_recientes?n=4000`);
     const data = await res.json();
-
-    document.getElementById('n-respuestas').textContent = data.total_respuestas;
-    document.getElementById('dominante').textContent =
-      NOMBRES[data.cluster_dominante] || data.cluster_dominante || '—';
-
-    document.getElementById('estado-dot').classList.add('vivo');
-    document.getElementById('estado-texto').textContent = 'corpus activo';
-
-    // Inicialización: poblar manchas existentes con leve aleatoriedad temporal
-    if (!inicializado && data.total_respuestas > 0) {
-      data.clusters.forEach(c => {
-        for (let i = 0; i < c.cantidad; i++) {
-          manchas.push(nuevaMancha(c.nombre, Math.random() * 30));
-        }
-      });
-      inicializado = true;
-      ultimoTotal = data.total_respuestas;
-    }
-    // Detectar respuestas nuevas
-    else if (data.total_respuestas > ultimoTotal) {
-      const nuevas = data.total_respuestas - ultimoTotal;
-      // Identificar el cluster dominante de las nuevas (aproximación)
-      const cluster = data.cluster_dominante || 'frio_metal';
-      for (let i = 0; i < nuevas; i++) {
-        setTimeout(() => {
-          manchas.push(nuevaMancha(cluster));
-          mostrarPalabra(extraerPalabraClave(data.prompt_actual) || 'voz', cluster);
-        }, i * 600);
+    totalRelatos = data.length > 0 ? Math.max(64, Math.round(data.length / 3.5)) : 64;
+    data.reverse();
+    for (const p of data) {
+      if (!pintitasMap.has(p.id)) {
+        pintitas.push(new Pintita(p.id, p.respuesta_id, p.categoria, false));
+        pintitasMap.set(p.id, true);
+        if (p.id > ultimaPintitaId) ultimaPintitaId = p.id;
       }
-      ultimoTotal = data.total_respuestas;
     }
-
+    actualizarEstado();
+    setTimeout(ajustarCamaraInicial, 100);
   } catch(e) {
-    document.getElementById('estado-dot').classList.remove('vivo');
-    document.getElementById('estado-texto').textContent = 'sin conexión';
+    console.error(e);
+    marcarSinConexion();
   }
 }
 
-consultar();
-setInterval(consultar, 5000); // cada 5 segundos para que la actividad se sienta viva
+async function consultarNuevas() {
+  try {
+    const res = await fetch(`${API_BASE}/pintitas_recientes?n=100`);
+    const data = await res.json();
+    const nuevas = data.filter(p => p.id > ultimaPintitaId);
+    nuevas.reverse();
+    for (const p of nuevas) {
+      if (!pintitasMap.has(p.id)) {
+        setTimeout(() => {
+          pintitas.push(new Pintita(p.id, p.respuesta_id, p.categoria, true));
+          pintitasMap.set(p.id, true);
+        }, Math.random() * 1500);
+        if (p.id > ultimaPintitaId) ultimaPintitaId = p.id;
+      }
+    }
+    actualizarEstado();
+  } catch(e) { marcarSinConexion(); }
+}
+
+async function actualizarEstado() {
+  try {
+    const res = await fetch(`${API_BASE}/estado`);
+    const data = await res.json();
+    totalRelatos = data.total_respuestas || totalRelatos;
+    document.getElementById('n-respuestas').textContent = data.total_respuestas;
+    document.getElementById('estado-dot').classList.add('vivo');
+    document.getElementById('estado-texto').textContent = 'corpus activo';
+  } catch(e) { marcarSinConexion(); }
+}
+
+function marcarSinConexion() {
+  document.getElementById('estado-dot').classList.remove('vivo');
+  document.getElementById('estado-texto').textContent = 'sin conexión';
+}
+
+inicializar();
+setInterval(consultarNuevas, POLL_INTERVAL);
+
+// ============================================================
+// MOVIMIENTO DEL CELULAR
+// ============================================================
+let motionActivo = false;
+let motionSolicitado = false;
+let ultimoShake = 0;
+
+function desordenarPorShake(intensidad) {
+  const centroX = hoverWorldX ?? 0;
+  const centroY = hoverWorldY ?? 0;
+  const radio = getWorldRadius() * 1.2;
+  for (const p of pintitas) {
+    const dx = p.x - centroX;
+    const dy = p.y - centroY;
+    const d = Math.sqrt(dx * dx + dy * dy) || 1;
+    const cerca = Math.max(0.18, 1 - d / radio);
+    const a = Math.random() * Math.PI * 2;
+    const m = intensidad * cerca * (0.55 + Math.random() * 0.85);
+    p.vx += Math.cos(a) * m;
+    p.vy += Math.sin(a) * m;
+    p.tiempoAgitacion = DURACION_AGITACION;
+  }
+}
+
+function activarMovimientoCelular() {
+  if (motionActivo || typeof DeviceMotionEvent === 'undefined') return;
+  motionActivo = true;
+  window.addEventListener('devicemotion', (e) => {
+    const acc = e.accelerationIncludingGravity || e.acceleration;
+    if (!acc) return;
+    const ax = acc.x || 0;
+    const ay = acc.y || 0;
+    const az = acc.z || 0;
+    const mag = Math.sqrt(ax * ax + ay * ay + az * az);
+    const ahora = performance.now();
+    if (mag > 16.2 && ahora - ultimoShake > 260) {
+      ultimoShake = ahora;
+      desordenarPorShake(Math.min(2.2, (mag - 13.5) * 0.095));
+    }
+  }, { passive: true });
+}
+
+async function prepararMovimientoCelular() {
+  if (motionActivo || motionSolicitado || typeof DeviceMotionEvent === 'undefined') return;
+  motionSolicitado = true;
+  try {
+    if (typeof DeviceMotionEvent.requestPermission === 'function') {
+      const permiso = await DeviceMotionEvent.requestPermission();
+      if (permiso === 'granted') activarMovimientoCelular();
+    } else {
+      activarMovimientoCelular();
+    }
+  } catch(e) {
+    // Algunos navegadores bloquean sensores en HTTP; la interacción táctil sigue activa.
+  }
+}
 </script>
 </body>
 </html>
