@@ -40,6 +40,15 @@
   .leyenda-dot { width: 8px; height: 8px; border-radius: 50%; transition: opacity 0.25s; flex-shrink: 0; }
 
   .estado { text-align: right; }
+  #btn-leyenda {
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    display: block;
+    transition: opacity 0.2s;
+  }
+  #btn-leyenda:active { opacity: 0.75; }
   .estado-dot { width: 5px; height: 5px; border-radius: 50%; background: #1a1a1a; display: inline-block; margin-right: 5px; vertical-align: middle; }
   .estado-dot.vivo { background: #1D9E75; box-shadow: 0 0 6px rgba(29,158,117,0.5); }
   .estado-texto { font-size: 9px; color: #444; letter-spacing: 0.12em; }
@@ -1101,6 +1110,13 @@ canvas.addEventListener('touchmove', (e) => {
     mousePrevX = sx; mousePrevY = sy;
     const wp = actualizarGesto(sx, sy, true, false);
     hoverWorldX = wp.x; hoverWorldY = wp.y;
+
+    // Boost directo de dispersión por velocidad táctil
+    const touchSpeed = Math.sqrt(dx * dx + dy * dy) / Math.max(1, ddt || 16) * 1000;
+    if (touchSpeed > 120) {
+      gesto.dispersion = Math.min(1, gesto.dispersion + (touchSpeed - 120) / 2800);
+      gesto.activo = true;
+    }
   }
 }, { passive: false });
 
