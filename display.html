@@ -24,6 +24,7 @@
   .n-label { font-size: 9px; color: #444; letter-spacing: 0.2em; margin-top: 3px; }
 
   .footer-bar { display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 0.8rem; }
+  .leyenda-wrapper { display: flex; align-items: flex-end; gap: 10px; }
   .leyenda {
     display: flex; flex-wrap: wrap; gap: 8px 14px; max-width: 78%;
     pointer-events: auto;
@@ -102,7 +103,10 @@
     </div>
   </div>
   <div class="footer-bar">
-    <div class="leyenda" id="leyenda"></div>
+    <div class="leyenda-wrapper">
+      <canvas id="btn-leyenda" width="36" height="36" title="Categorías" style="pointer-events:auto;cursor:pointer;border-radius:50%;"></canvas>
+      <div class="leyenda" id="leyenda" style="display:none"></div>
+    </div>
     <div class="estado">
       <span class="estado-dot" id="estado-dot"></span>
       <span class="estado-texto" id="estado-texto">conectando</span>
@@ -1095,7 +1099,7 @@ canvas.addEventListener('touchmove', (e) => {
       ultimoMouseTime = ahora;
     }
     mousePrevX = sx; mousePrevY = sy;
-    const wp = actualizarGesto(sx, sy, true, true);
+    const wp = actualizarGesto(sx, sy, true, false);
     hoverWorldX = wp.x; hoverWorldY = wp.y;
   }
 }, { passive: false });
@@ -1179,6 +1183,64 @@ function clickCategoria(cat, soloEsta) {
   actualizarLeyenda();
 }
 
+let leyendaVisible = false;
+
+function dibujarBtnLeyenda() {
+  const btn = document.getElementById('btn-leyenda');
+  if (!btn) return;
+  const bc = btn.getContext('2d');
+  const tam = 36;
+  bc.clearRect(0, 0, tam, tam);
+
+  // Círculo difuso con los colores de las categorías
+  const colores = Object.values(CATEGORIAS).map(v => v.color);
+  const nC = colores.length;
+
+  // Fondo base muy oscuro
+  bc.save();
+  bc.beginPath();
+  bc.arc(tam/2, tam/2, tam/2, 0, Math.PI * 2);
+  bc.fillStyle = 'rgba(12,8,14,0.7)';
+  bc.fill();
+  bc.restore();
+
+  // Manchas de color difusas por encima
+  colores.forEach((col, i) => {
+    const ang = (i / nC) * Math.PI * 2 - Math.PI / 2;
+    const r = 8 + Math.random() * 3;
+    const cx = tam/2 + Math.cos(ang) * 9;
+    const cy = tam/2 + Math.sin(ang) * 9;
+    const grd = bc.createRadialGradient(cx, cy, 0, cx, cy, r * 1.8);
+    grd.addColorStop(0, col + 'cc');
+    grd.addColorStop(0.5, col + '55');
+    grd.addColorStop(1, col + '00');
+    bc.save();
+    bc.globalCompositeOperation = 'screen';
+    bc.beginPath();
+    bc.arc(tam/2, tam/2, tam/2 - 0.5, 0, Math.PI * 2);
+    bc.clip();
+    bc.fillStyle = grd;
+    bc.fillRect(0, 0, tam, tam);
+    bc.restore();
+  });
+
+  // Borde sutil
+  bc.save();
+  bc.beginPath();
+  bc.arc(tam/2, tam/2, tam/2 - 1, 0, Math.PI * 2);
+  bc.strokeStyle = leyendaVisible ? 'rgba(200,180,160,0.5)' : 'rgba(200,180,160,0.15)';
+  bc.lineWidth = 1;
+  bc.stroke();
+  bc.restore();
+}
+
+function toggleLeyenda() {
+  leyendaVisible = !leyendaVisible;
+  const cont = document.getElementById('leyenda');
+  cont.style.display = leyendaVisible ? 'flex' : 'none';
+  dibujarBtnLeyenda();
+}
+
 function actualizarLeyenda() {
   const cont = document.getElementById('leyenda');
   cont.innerHTML = Object.entries(CATEGORIAS).map(([k, v]) => {
@@ -1196,7 +1258,15 @@ function actualizarLeyenda() {
     });
   });
 }
+
 actualizarLeyenda();
+dibujarBtnLeyenda();
+
+const btnLeyenda = document.getElementById('btn-leyenda');
+if (btnLeyenda) {
+  btnLeyenda.addEventListener('click', toggleLeyenda);
+  btnLeyenda.addEventListener('touchend', (e) => { e.preventDefault(); toggleLeyenda(); });
+}
 
 // ============================================================
 // CONEXIÓN AL SERVIDOR
