@@ -1151,12 +1151,9 @@ let pinchActivo = false;
 let touchPanStartX = 0, touchPanStartY = 0;
 let touchPanLastX = 0, touchPanLastY = 0;
 let touchDragDist = 0;
-let pointerTactilId = null;
-let pointerTactilDrag = 0;
 
 canvas.addEventListener('touchstart', (e) => {
   e.preventDefault();
-  if (pointerTactilId !== null) return;
   pinchActivo = e.touches.length >= 2;
   touchDragDist = 0;
 
@@ -1182,8 +1179,6 @@ canvas.addEventListener('touchstart', (e) => {
 
 canvas.addEventListener('touchmove', (e) => {
   e.preventDefault();
-  if (pointerTactilId !== null) return;
-
   if (e.touches.length >= 2) {
     pinchActivo = true;
     isDragging = false;
@@ -1227,10 +1222,6 @@ canvas.addEventListener('touchmove', (e) => {
 }, { passive: false });
 
 canvas.addEventListener('touchend', async (e) => {
-  if (pointerTactilId !== null) {
-    e.preventDefault();
-    return;
-  }
   if (e.touches.length === 0) {
     if (!pinchActivo && touchDragDist < 10) {
       const rect = canvas.getBoundingClientRect();
@@ -1265,66 +1256,7 @@ canvas.addEventListener('touchend', async (e) => {
   }
 }, { passive: false });
 
-if (window.PointerEvent) {
-  canvas.addEventListener('pointerdown', (e) => {
-    if (e.pointerType === 'mouse') return;
-    e.preventDefault();
-    pointerTactilId = e.pointerId;
-    pointerTactilDrag = 0;
-    pinchActivo = false;
-    touchPanStartX = e.clientX;
-    touchPanStartY = e.clientY;
-    touchPanLastX = e.clientX;
-    touchPanLastY = e.clientY;
-    try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
-    const rect = canvas.getBoundingClientRect();
-    const w = actualizarGesto(e.clientX - rect.left, e.clientY - rect.top, true, true, true);
-    hoverWorldX = w.x; hoverWorldY = w.y;
-    prepararMovimientoCelular();
-  }, { passive: false });
-
-  canvas.addEventListener('pointermove', (e) => {
-    if (e.pointerType === 'mouse' || pointerTactilId !== e.pointerId) return;
-    e.preventDefault();
-    const dx = e.clientX - touchPanLastX;
-    const dy = e.clientY - touchPanLastY;
-    pointerTactilDrag += Math.abs(dx) + Math.abs(dy);
-    touchPanLastX = e.clientX;
-    touchPanLastY = e.clientY;
-    const rect = canvas.getBoundingClientRect();
-    const sx = e.clientX - rect.left;
-    const sy = e.clientY - rect.top;
-    const wp = actualizarGesto(sx, sy, true, true, true);
-    gesto.dispersion = Math.min(1, gesto.dispersion + Math.min(0.22, pointerTactilDrag / 900));
-    hoverWorldX = wp.x; hoverWorldY = wp.y;
-  }, { passive: false });
-
-  const cerrarPointerTactil = async (e) => {
-    if (e.pointerType === 'mouse' || pointerTactilId !== e.pointerId) return;
-    e.preventDefault();
-    if (pointerTactilDrag < 10) {
-      const rect = canvas.getBoundingClientRect();
-      const sx = touchPanStartX - rect.left;
-      const sy = touchPanStartY - rect.top;
-      const w = screenToWorld(sx, sy);
-      let target = null, best = Infinity;
-      for (const p of pintitas) {
-        if (p.contieneEnMundo(w.x, w.y)) {
-          const dx = w.x - p.x, dy = w.y - p.y;
-          const d = dx * dx + dy * dy;
-          if (d < best) { best = d; target = p; }
-        }
-      }
-      if (target) await abrirRelato(target.respuestaId);
-    }
-    pointerTactilId = null;
-    pointerTactilDrag = 0;
-    soltarGesto();
-  };
-
-  canvas.addEventListener('pointerup', cerrarPointerTactil, { passive: false });
-  canvas.addEventListener('pointercancel', cerrarPointerTactil, { passive: false });
-}
+// Pointer events removidos — los touch events con tactil=true manejan todo
 
 // ============================================================
 // MODAL
