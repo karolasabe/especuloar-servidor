@@ -1278,8 +1278,8 @@ async function abrirRelato(respuestaId) {
     const data = await res.json();
     if (data.status === 'error') return;
     document.getElementById('modal-texto').textContent = data.relato || '(sin contenido)';
-    const cats = data.categorias_activadas || {};
-    document.getElementById('modal-cats').innerHTML = Object.keys(cats).map(cat => {
+    const cats = data.categorias_activadas || [];
+    document.getElementById('modal-cats').innerHTML = cats.map(cat => {
       const info = CATEGORIAS[cat] || { color: '#888', nombre: cat };
       return `<span class="modal-cat-chip" style="background:${info.color}">${info.nombre}</span>`;
     }).join('');
