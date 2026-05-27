@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import json
 import os
+import re
 import urllib.request
 import urllib.error
 import psycopg2
@@ -592,7 +593,10 @@ def analizar_relato(texto):
     texto_lower = texto.lower()
     resultado = {}
     for cat, datos in CATEGORIAS.items():
-        menciones = sum(1 for p in datos['palabras'] if p in texto_lower)
+        menciones = sum(
+            1 for p in datos['palabras']
+            if re.search(r'(?<!\w)' + re.escape(p) + r'(?!\w)', texto_lower)
+        )
         if menciones > 0:
             palabras_texto = max(1, len(texto.split()))
             intensidad = min(1.0, menciones / max(1, palabras_texto / 20))
