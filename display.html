@@ -130,6 +130,15 @@
     font-size: 11px; cursor: pointer; font-family: inherit; letter-spacing: 0.1em;
   }
   .modal-cerrar:hover { color: #ccc; }
+  .modal-traducir {
+    display: none; margin-top: 1.4rem;
+    background: none; border: none;
+    color: rgba(255,255,255,0.28); font-size: 9px;
+    letter-spacing: 0.14em; cursor: pointer;
+    font-family: 'Space Mono', monospace;
+    padding: 0; transition: color 0.2s;
+  }
+  .modal-traducir:hover { color: rgba(255,255,255,0.6); }
 
   @media (max-width: 640px) {
     #overlay { padding: 1.1rem; }
@@ -234,6 +243,7 @@
     <button class="modal-cerrar" onclick="cerrarModal()">cerrar</button>
     <div class="modal-categorias" id="modal-cats"></div>
     <div class="modal-relato" id="modal-texto"></div>
+    <button class="modal-traducir" id="modal-traducir" onclick="toggleTraduccion()">ver en español</button>
   </div>
 </div>
 
@@ -255,15 +265,17 @@ const API_BASE = (_esLocal && window.location.protocol.startsWith('http'))
 const POLL_INTERVAL = 5000;
 
 const CATEGORIAS = {
-  'dolor_fisico':              { color: '#FF2424', nombre: 'Dolor físico' },
-  'frio_metal':                { color: '#2EC4D8', nombre: 'Materiales desagradables/fríos' },
-  'materiales_agradables':     { color: '#E8935A', nombre: 'Materiales agradables / cálidos' },
-  'miedo_ansiedad':            { color: '#A01F35', nombre: 'Miedo / ansiedad / preocupación' },
-  'sensaciones_agradables':    { color: '#D4847A', nombre: 'Sensaciones agradables / seguridad / calma' },
-  'normalizacion':             { color: '#6BBF8A', nombre: 'Normalización / resignación' },
-  'vivencia_sexual_traumatica':{ color: '#B814E8', nombre: 'Violencia sexual' },
-  'profesional_masculino':     { color: '#9E9E9E', nombre: 'Profesional de salud masculino presente' },
-  'profesional_femenino':      { color: '#F5DD2C', nombre: 'Profesional mujer' }
+  'dolor_fisico':          { color: '#FF2424', nombre: 'Dolor físico' },
+  'miedo':                 { color: '#A01F35', nombre: 'Miedo' },
+  'verguenza_exposicion':  { color: '#C4943D', nombre: 'Vergüenza / exposición' },
+  'sensaciones_frias':     { color: '#2EC4D8', nombre: 'Sensaciones frías' },
+  'sensaciones_calidas':   { color: '#E8935A', nombre: 'Sensaciones cálidas' },
+  'sonido':                { color: '#6BBF8A', nombre: 'Sonido / acústica' },
+  'aromas':                { color: '#E8E0D4', nombre: 'Aromas / olores' },
+  'violencia_sexual':      { color: '#B814E8', nombre: 'Violencia sexual' },
+  'placer_deseo':          { color: '#FF2D8A', nombre: 'Placer / deseo' },
+  'profesional_hombre':    { color: '#4A7BAF', nombre: 'Profesional hombre' },
+  'profesional_mujer':     { color: '#F5DD2C', nombre: 'Profesional mujer' }
 };
 
 const filtrosActivos = {};
@@ -1272,12 +1284,22 @@ canvas.addEventListener('touchend', async (e) => {
 // ============================================================
 // MODAL
 // ============================================================
+let _relatoOriginal = '';
+let _relatoTraducido = null;
+let _mostrandoTraduccion = false;
+
 async function abrirRelato(respuestaId) {
   try {
     const res = await fetch(`${API_BASE}/relato/${respuestaId}`);
     const data = await res.json();
     if (data.status === 'error') return;
-    document.getElementById('modal-texto').textContent = data.relato || '(sin contenido)';
+    _relatoOriginal = data.relato || '(sin contenido)';
+    _relatoTraducido = data.relato_traducido || null;
+    _mostrandoTraduccion = false;
+    document.getElementById('modal-texto').textContent = _relatoOriginal;
+    const btn = document.getElementById('modal-traducir');
+    btn.style.display = data.idioma === 'en' ? 'block' : 'none';
+    btn.textContent = 'ver en español';
     const cats = data.categorias_activadas || [];
     document.getElementById('modal-cats').innerHTML = cats.map(cat => {
       const info = CATEGORIAS[cat] || { color: '#888', nombre: cat };
@@ -1286,7 +1308,41 @@ async function abrirRelato(respuestaId) {
     document.getElementById('modal').classList.add('activo');
   } catch(e) { console.error(e); }
 }
-function cerrarModal() { document.getElementById('modal').classList.remove('activo'); }
+
+async function toggleTraduccion() {
+  const btn = document.getElementById('modal-traducir');
+  const caja = document.getElementById('modal-texto');
+  if (_mostrandoTraduccion) {
+    caja.textContent = _relatoOriginal;
+    btn.textContent = 'ver en español';
+    _mostrandoTraduccion = false;
+    return;
+  }
+  if (_relatoTraducido) {
+    caja.textContent = _relatoTraducido;
+    btn.textContent = 'ver original';
+    _mostrandoTraduccion = true;
+    return;
+  }
+  btn.textContent = 'traduciendo...';
+  try {
+    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(_relatoOriginal)}&langpair=en|es`;
+    const res = await fetch(url);
+    const json = await res.json();
+    _relatoTraducido = json.responseData.translatedText;
+    caja.textContent = _relatoTraducido;
+    btn.textContent = 'ver original';
+    _mostrandoTraduccion = true;
+  } catch {
+    btn.textContent = 'ver en español';
+  }
+}
+
+function cerrarModal() {
+  document.getElementById('modal').classList.remove('activo');
+  _relatoTraducido = null;
+  _mostrandoTraduccion = false;
+}
 document.getElementById('modal').addEventListener('click', (e) => {
   if (e.target.id === 'modal') cerrarModal();
 });
