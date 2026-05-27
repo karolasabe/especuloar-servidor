@@ -1522,6 +1522,144 @@ async function prepararMovimientoCelular() {
     // Algunos navegadores bloquean sensores en HTTP; la interacción táctil sigue activa.
   }
 }
+
+// ============================================================
+// MODO PROYECCIÓN — cámara + MediaPipe Pose
+// Activar con: display.html?modo=proyeccion
+// ============================================================
+const MODO_PROYECCION = new URLSearchParams(window.location.search).get('modo') === 'proyeccion';
+
+if (MODO_PROYECCION) {
+  document.body.style.cursor = 'none';
+
+  // Bloquear toda interacción de mouse/touch antes de que llegue al canvas
+  ['mousedown', 'mousemove', 'mouseup', 'mouseleave',
+   'touchstart', 'touchmove', 'touchend'].forEach(tipo => {
+    window.addEventListener(tipo, e => e.stopPropagation(), true);
+  });
+
+  // Indicador de estado de cámara — discreto, esquina inferior derecha
+  const camEstado = document.createElement('div');
+  camEstado.style.cssText = `
+    position: fixed; bottom: 1.8rem; right: 1.8rem; z-index: 99;
+    display: flex; align-items: center; gap: 6px;
+    font-family: 'Space Mono', monospace; font-size: 9px;
+    letter-spacing: 0.12em; color: #444; pointer-events: none;
+  `;
+  camEstado.innerHTML = `<span id="cam-dot" style="width:5px;height:5px;border-radius:50%;background:#1a1a1a;display:inline-block;"></span>
+    <span id="cam-txt">cámara</span>`;
+  document.body.appendChild(camEstado);
+
+  function setCamEstado(color, texto) {
+    document.getElementById('cam-dot').style.background = color;
+    document.getElementById('cam-txt').textContent = texto;
+    if (color === '#1D9E75') {
+      document.getElementById('cam-dot').style.boxShadow = '0 0 6px rgba(29,158,117,0.5)';
+    }
+  }
+
+  function cargarScript(src) {
+    return new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload = res;
+      s.onerror = rej;
+      document.head.appendChild(s);
+    });
+  }
+
+  async function iniciarPose() {
+    // Versiones fijadas para evitar cambios de API entre builds
+    const MP_CAM  = 'https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1640029074/camera_utils.js';
+    const MP_POSE = 'https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404';
+
+    await cargarScript(MP_CAM);
+    await cargarScript(`${MP_POSE}/pose.js`);
+
+    // Video oculto para la cámara
+    const videoEl = document.createElement('video');
+    videoEl.style.cssText = 'position:fixed;opacity:0;pointer-events:none;width:1px;height:1px;';
+    document.body.appendChild(videoEl);
+
+    const pose = new Pose({
+      locateFile: file => `${MP_POSE}/${file}`
+    });
+    pose.setOptions({
+      modelComplexity: 1,
+      smoothLandmarks: true,
+      enableSegmentation: false,
+      smoothSegmentation: false,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
+    });
+
+    let bodyPrevSX = null, bodyPrevSY = null, bodyPrevT = performance.now();
+    let framesAusente = 0;
+
+    pose.onResults(results => {
+      if (!results.poseLandmarks) {
+        framesAusente++;
+        // ~1.5s sin cuerpo → apagar gesto
+        if (framesAusente > 45) {
+          soltarGesto();
+          hoverWorldX = null;
+          hoverWorldY = null;
+          setCamEstado('#C4943D', 'esperando');
+        }
+        return;
+      }
+
+      framesAusente = 0;
+      setCamEstado('#1D9E75', 'cuerpo activo');
+
+      // Centro de hombros (landmarks 11 y 12)
+      const l11 = results.poseLandmarks[11];
+      const l12 = results.poseLandmarks[12];
+      const normX = (l11.x + l12.x) / 2;
+      const normY = (l11.y + l12.y) / 2;
+
+      // Mirror X (imagen especular de cámara) → mapear a pantalla
+      const sx = (1 - normX) * W;
+      const sy = normY * H;
+
+      // Calcular velocidad del cuerpo para dispersion por movimiento rápido
+      const ahora = performance.now();
+      if (bodyPrevSX !== null) {
+        const dvx = sx - bodyPrevSX, dvy = sy - bodyPrevSY;
+        const ddt = Math.max(1, ahora - bodyPrevT);
+        const v = Math.sqrt(dvx * dvx + dvy * dvy) / ddt * 1000;
+        mouseVel = mouseVel * 0.6 + v * 0.4;
+        ultimoMouseTime = ahora;
+      }
+      mousePrevX = sx; mousePrevY = sy;
+      bodyPrevSX = sx; bodyPrevSY = sy; bodyPrevT = ahora;
+
+      // tactil=true → radio de influencia mayor (cuerpo ≠ cursor)
+      const eraActivo = gesto.activo;
+      const w = actualizarGesto(sx, sy, true, false, true);
+      hoverWorldX = w.x;
+      hoverWorldY = w.y;
+
+      // Dispersión inicial al entrar en frame
+      if (!eraActivo) gesto.dispersion = 0.35;
+    });
+
+    const camera = new Camera(videoEl, {
+      onFrame: async () => { await pose.send({ image: videoEl }); },
+      width: 640,
+      height: 480
+    });
+
+    setCamEstado('#C4943D', 'iniciando');
+    await camera.start();
+    setCamEstado('#C4943D', 'esperando');
+  }
+
+  iniciarPose().catch(err => {
+    console.error('[proyección] error cámara:', err);
+    setCamEstado('#8B0000', 'error cámara');
+  });
+}
 </script>
 </body>
 </html>
