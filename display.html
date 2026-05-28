@@ -1524,9 +1524,9 @@ async function prepararMovimientoCelular() {
 }
 
 // ============================================================
-// MODO PROYECCIÓN — detección de movimiento por diferencia de frames
+// MODO PROYECCIÓN — cliente WebSocket de gestos corporales
 // Activar con: display.html?modo=proyeccion
-// Sin modelo ML — solo cámara y canvas. Liviano y reactivo.
+// Requiere gesto_servidor.py corriendo en ws://localhost:8765
 // ============================================================
 const MODO_PROYECCION = new URLSearchParams(window.location.search).get('modo') === 'proyeccion';
 
@@ -1534,157 +1534,131 @@ if (MODO_PROYECCION) {
   document.body.style.cursor = 'none';
   window.abrirRelato = async () => {};
 
-  // Bloquear interacción de mouse/touch
-  ['mousedown', 'mousemove', 'mouseup', 'mouseleave',
-   'touchstart', 'touchmove', 'touchend'].forEach(tipo => {
-    window.addEventListener(tipo, e => e.stopPropagation(), true);
-  });
+  // Bloquear mouse/touch — en proyección no hay interacción directa
+  ['mousedown','mousemove','mouseup','mouseleave',
+   'touchstart','touchmove','touchend'].forEach(tipo =>
+    window.addEventListener(tipo, e => e.stopPropagation(), true)
+  );
 
-  // Indicador de estado — esquina inferior derecha
-  const camEstado = document.createElement('div');
-  camEstado.style.cssText = `
+  // ── Indicador de estado (esquina inferior derecha)
+  const indicador = document.createElement('div');
+  indicador.style.cssText = `
     position: fixed; bottom: 1.8rem; right: 1.8rem; z-index: 99;
-    display: flex; align-items: center; gap: 6px;
+    display: flex; align-items: center; gap: 7px;
     font-family: 'Space Mono', monospace; font-size: 9px;
-    letter-spacing: 0.12em; color: #555; pointer-events: none;
+    letter-spacing: 0.12em; color: #444; pointer-events: none;
   `;
-  camEstado.innerHTML = `
-    <span id="cam-dot" style="width:5px;height:5px;border-radius:50%;background:#1a1a1a;display:inline-block"></span>
-    <span id="cam-txt">cámara</span>`;
-  document.body.appendChild(camEstado);
+  indicador.innerHTML = `
+    <span id="gs-dot" style="width:5px;height:5px;border-radius:50%;
+      background:#1a1a1a;display:inline-block;transition:background 0.3s"></span>
+    <span id="gs-txt">gestos</span>`;
+  document.body.appendChild(indicador);
 
-  function setCamEstado(color, texto) {
-    const dot = document.getElementById('cam-dot');
-    const txt = document.getElementById('cam-txt');
-    if (dot) { dot.style.background = color; dot.style.boxShadow = color !== '#1a1a1a' ? `0 0 6px ${color}88` : 'none'; }
-    if (txt) txt.textContent = texto;
+  function setEstado(color, texto) {
+    const d = document.getElementById('gs-dot');
+    const t = document.getElementById('gs-txt');
+    if (d) { d.style.background = color; d.style.boxShadow = color !== '#1a1a1a' ? `0 0 7px ${color}99` : 'none'; }
+    if (t) t.textContent = texto;
   }
 
-  // Parámetros de detección
-  const CAM_W = 80, CAM_H = 60;        // Resolución de análisis (baja = rápido)
-  const GRID_X = 10, GRID_Y = 8;        // Celdas de detección (80 zonas)
-  const UMBRAL = 20;                     // Diferencia mínima por canal para contar movimiento
-  const FUERZA_BASE = 1.4;              // Magnitud de repulsión (subir para más dramatismo)
-  const RADIO_MUNDO = 300;              // Radio de influencia en unidades mundo
+  // ── Parámetros de mapeo (ajustables sin tocar la lógica de partículas)
+  const MAPA = {
+    dispersionBase:     0.55,   // cuánto afecta la apertura de brazos a la dispersión
+    velocidadAmp:       2.2,    // amplificador de mouseVel desde velocidad corporal
+    inclinacionOffset:  0.14,   // cuánto desplaza la inclinación el punto de interacción (X)
+    alturaOffset:       0.28,   // cuánto desplaza la altura de brazos el punto (Y)
+    radioDistancia:     1.8,    // multiplicador del radio de influencia por distancia
+  };
 
-  const offCanvas = document.createElement('canvas');
-  offCanvas.width = CAM_W; offCanvas.height = CAM_H;
-  const offCtx = offCanvas.getContext('2d', { willReadFrequently: true });
+  // ── Último estado recibido (suavizado para evitar saltos)
+  let g = { activo: false, cx: 0.5, cy: 0.5, distancia: 0.5,
+            apertura: 0, altura_brazos: 0.3, velocidad: 0, inclinacion: 0 };
+  let gPrev = { ...g };
+  const LERP = 0.28; // suavizado de transición entre frames (0=rígido, 1=instantáneo)
 
-  let prevFrameData = null;
+  function lerp(a, b, t) { return a + (b - a) * t; }
 
-  function screenToWorld(sx, sy) {
-    return {
-      x: (sx - W / 2) / cam.scale + cam.x,
-      y: (sy - H / 2) / cam.scale + cam.y
+  function aplicarGesto(raw) {
+    if (!raw.activo) {
+      // Cuerpo fuera de cuadro: apagar gesto gradualmente
+      if (gesto.activo) {
+        gesto.dispersion *= 0.85;
+        gesto.jitter     *= 0.85;
+        if (gesto.dispersion < 0.01) soltarGesto();
+      }
+      setEstado('#C4943D', 'sin cuerpo');
+      return;
+    }
+
+    setEstado('#1D9E75', 'cuerpo activo');
+
+    // Suavizar transición entre frames
+    g.cx            = lerp(gPrev.cx,            raw.cx,            LERP);
+    g.cy            = lerp(gPrev.cy,            raw.cy,            LERP);
+    g.distancia     = lerp(gPrev.distancia,     raw.distancia,     LERP);
+    g.apertura      = lerp(gPrev.apertura,      raw.apertura,      LERP);
+    g.altura_brazos = lerp(gPrev.altura_brazos, raw.altura_brazos, LERP);
+    g.velocidad     = lerp(gPrev.velocidad,     raw.velocidad,     LERP * 0.6);
+    g.inclinacion   = lerp(gPrev.inclinacion,   raw.inclinacion,   LERP);
+    gPrev = { ...g };
+
+    // ── Posición de interacción:
+    //    La inclinación desplaza X, la altura de brazos desplaza Y hacia arriba
+    const sx = (g.cx + g.inclinacion * MAPA.inclinacionOffset) * W;
+    const sy = (g.cy - (g.altura_brazos - 0.3) * MAPA.alturaOffset) * H;
+
+    // Llamar al sistema de gesto existente — calcula jitter y speed internamente
+    // tactil=true → radio de influencia mayor (apropiado para cuerpo completo)
+    const usarTactil = g.distancia > 0.35;
+    actualizarGesto(sx, sy, true, false, usarTactil);
+
+    // ── Apertura de brazos → dispersión adicional
+    //    Brazos abiertos = mayor scatter de partículas
+    gesto.dispersion = Math.min(1, gesto.dispersion + g.apertura * MAPA.dispersionBase);
+
+    // ── Velocidad corporal → agitación global (mouseVel)
+    //    Movimiento rápido = partículas más agitadas
+    mouseVel = Math.min(4, mouseVel + g.velocidad * MAPA.velocidadAmp);
+    ultimoMouseTime = performance.now();
+
+    // ── Actualizar posición de hover (para desordenarPorShake y efectos de fondo)
+    hoverWorldX = gesto.x;
+    hoverWorldY = gesto.y;
+  }
+
+  // ── Conexión WebSocket
+  function conectarWS() {
+    setEstado('#C4943D', 'conectando');
+    const ws = new WebSocket('ws://localhost:8765');
+
+    ws.onopen = () => {
+      setEstado('#C4943D', 'sin cuerpo');
+      console.log('[proyección] WebSocket conectado');
+    };
+
+    ws.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        aplicarGesto(data);
+      } catch (err) {
+        console.warn('[proyección] mensaje inválido:', err);
+      }
+    };
+
+    ws.onclose = () => {
+      setEstado('#8B0000', 'sin servidor');
+      console.warn('[proyección] WebSocket cerrado — reintentando en 3s');
+      soltarGesto();
+      setTimeout(conectarWS, 3000);
+    };
+
+    ws.onerror = (err) => {
+      console.error('[proyección] WebSocket error:', err);
+      ws.close();
     };
   }
 
-  function aplicarFuerzas(zonas) {
-    const radioAjustado = RADIO_MUNDO / Math.max(0.3, cam.scale);
-    const radio2 = radioAjustado * radioAjustado;
-
-    for (const p of pintitas) {
-      for (const z of zonas) {
-        const dx = p.x - z.wx;
-        const dy = p.y - z.wy;
-        const dist2 = dx * dx + dy * dy;
-        if (dist2 < radio2 && dist2 > 0.01) {
-          const dist = Math.sqrt(dist2);
-          const mag = FUERZA_BASE * z.intensidad * (1 - dist / radioAjustado);
-          p.vx += (dx / dist) * mag;
-          p.vy += (dy / dist) * mag;
-        }
-      }
-    }
-  }
-
-  function detectarMovimiento(video) {
-    if (video.readyState < 2) return;
-
-    offCtx.drawImage(video, 0, 0, CAM_W, CAM_H);
-    const frame = offCtx.getImageData(0, 0, CAM_W, CAM_H);
-    const curr = frame.data;
-
-    if (!prevFrameData) {
-      prevFrameData = new Uint8ClampedArray(curr);
-      return;
-    }
-
-    const cW = CAM_W / GRID_X;
-    const cH = CAM_H / GRID_Y;
-    const zonas = [];
-
-    for (let gy = 0; gy < GRID_Y; gy++) {
-      for (let gx = 0; gx < GRID_X; gx++) {
-        let difAcum = 0, count = 0;
-        const px0 = Math.floor(gx * cW), px1 = Math.floor((gx + 1) * cW);
-        const py0 = Math.floor(gy * cH), py1 = Math.floor((gy + 1) * cH);
-
-        for (let py = py0; py < py1; py++) {
-          for (let px = px0; px < px1; px++) {
-            const i = (py * CAM_W + px) * 4;
-            difAcum += (Math.abs(curr[i]   - prevFrameData[i])   +
-                        Math.abs(curr[i+1] - prevFrameData[i+1]) +
-                        Math.abs(curr[i+2] - prevFrameData[i+2])) / 3;
-            count++;
-          }
-        }
-
-        const media = difAcum / count;
-        if (media > UMBRAL) {
-          // Espejo en X (cámara devuelve imagen especular)
-          const sx = (1 - (gx + 0.5) / GRID_X) * W;
-          const sy = ((gy + 0.5) / GRID_Y) * H;
-          const w = screenToWorld(sx, sy);
-          zonas.push({ wx: w.x, wy: w.y, intensidad: Math.min(1, (media - UMBRAL) / 80) });
-        }
-      }
-    }
-
-    prevFrameData = new Uint8ClampedArray(curr);
-
-    if (zonas.length > 0) {
-      setCamEstado('#1D9E75', 'movimiento');
-      aplicarFuerzas(zonas);
-    } else {
-      setCamEstado('#C4943D', 'en espera');
-    }
-  }
-
-  async function iniciarDeteccion() {
-    setCamEstado('#C4943D', 'iniciando');
-
-    const video = document.createElement('video');
-    video.autoplay = true; video.playsInline = true;
-    video.style.cssText = 'position:fixed;opacity:0;pointer-events:none;width:1px;height:1px;';
-    document.body.appendChild(video);
-
-    let stream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 320, height: 240, facingMode: 'user' }
-      });
-    } catch (err) {
-      setCamEstado('#8B0000', 'error cámara');
-      console.error('[proyección] cámara no disponible:', err);
-      return;
-    }
-
-    video.srcObject = stream;
-    await new Promise(r => { video.onloadedmetadata = r; });
-    video.play();
-
-    setCamEstado('#C4943D', 'en espera');
-
-    // 20fps de análisis — suficiente para movimiento, liviano para CPU
-    setInterval(() => detectarMovimiento(video), 50);
-  }
-
-  iniciarDeteccion().catch(err => {
-    setCamEstado('#8B0000', 'error');
-    console.error('[proyección]', err);
-  });
+  conectarWS();
 }
 </script>
 </body>
