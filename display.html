@@ -1524,140 +1524,166 @@ async function prepararMovimientoCelular() {
 }
 
 // ============================================================
-// MODO PROYECCIÓN — cámara + MediaPipe Pose
+// MODO PROYECCIÓN — detección de movimiento por diferencia de frames
 // Activar con: display.html?modo=proyeccion
+// Sin modelo ML — solo cámara y canvas. Liviano y reactivo.
 // ============================================================
 const MODO_PROYECCION = new URLSearchParams(window.location.search).get('modo') === 'proyeccion';
 
 if (MODO_PROYECCION) {
   document.body.style.cursor = 'none';
+  window.abrirRelato = async () => {};
 
-  // Bloquear toda interacción de mouse/touch antes de que llegue al canvas
+  // Bloquear interacción de mouse/touch
   ['mousedown', 'mousemove', 'mouseup', 'mouseleave',
    'touchstart', 'touchmove', 'touchend'].forEach(tipo => {
     window.addEventListener(tipo, e => e.stopPropagation(), true);
   });
 
-  // Indicador de estado de cámara — discreto, esquina inferior derecha
+  // Indicador de estado — esquina inferior derecha
   const camEstado = document.createElement('div');
   camEstado.style.cssText = `
     position: fixed; bottom: 1.8rem; right: 1.8rem; z-index: 99;
     display: flex; align-items: center; gap: 6px;
     font-family: 'Space Mono', monospace; font-size: 9px;
-    letter-spacing: 0.12em; color: #444; pointer-events: none;
+    letter-spacing: 0.12em; color: #555; pointer-events: none;
   `;
-  camEstado.innerHTML = `<span id="cam-dot" style="width:5px;height:5px;border-radius:50%;background:#1a1a1a;display:inline-block;"></span>
+  camEstado.innerHTML = `
+    <span id="cam-dot" style="width:5px;height:5px;border-radius:50%;background:#1a1a1a;display:inline-block"></span>
     <span id="cam-txt">cámara</span>`;
   document.body.appendChild(camEstado);
 
   function setCamEstado(color, texto) {
-    document.getElementById('cam-dot').style.background = color;
-    document.getElementById('cam-txt').textContent = texto;
-    if (color === '#1D9E75') {
-      document.getElementById('cam-dot').style.boxShadow = '0 0 6px rgba(29,158,117,0.5)';
+    const dot = document.getElementById('cam-dot');
+    const txt = document.getElementById('cam-txt');
+    if (dot) { dot.style.background = color; dot.style.boxShadow = color !== '#1a1a1a' ? `0 0 6px ${color}88` : 'none'; }
+    if (txt) txt.textContent = texto;
+  }
+
+  // Parámetros de detección
+  const CAM_W = 80, CAM_H = 60;        // Resolución de análisis (baja = rápido)
+  const GRID_X = 10, GRID_Y = 8;        // Celdas de detección (80 zonas)
+  const UMBRAL = 20;                     // Diferencia mínima por canal para contar movimiento
+  const FUERZA_BASE = 1.4;              // Magnitud de repulsión (subir para más dramatismo)
+  const RADIO_MUNDO = 300;              // Radio de influencia en unidades mundo
+
+  const offCanvas = document.createElement('canvas');
+  offCanvas.width = CAM_W; offCanvas.height = CAM_H;
+  const offCtx = offCanvas.getContext('2d', { willReadFrequently: true });
+
+  let prevFrameData = null;
+
+  function screenToWorld(sx, sy) {
+    return {
+      x: (sx - W / 2) / cam.scale + cam.x,
+      y: (sy - H / 2) / cam.scale + cam.y
+    };
+  }
+
+  function aplicarFuerzas(zonas) {
+    const radioAjustado = RADIO_MUNDO / Math.max(0.3, cam.scale);
+    const radio2 = radioAjustado * radioAjustado;
+
+    for (const p of pintitas) {
+      for (const z of zonas) {
+        const dx = p.x - z.wx;
+        const dy = p.y - z.wy;
+        const dist2 = dx * dx + dy * dy;
+        if (dist2 < radio2 && dist2 > 0.01) {
+          const dist = Math.sqrt(dist2);
+          const mag = FUERZA_BASE * z.intensidad * (1 - dist / radioAjustado);
+          p.vx += (dx / dist) * mag;
+          p.vy += (dy / dist) * mag;
+        }
+      }
     }
   }
 
-  function cargarScript(src) {
-    return new Promise((res, rej) => {
-      const s = document.createElement('script');
-      s.src = src;
-      s.onload = res;
-      s.onerror = rej;
-      document.head.appendChild(s);
-    });
-  }
+  function detectarMovimiento(video) {
+    if (video.readyState < 2) return;
 
-  async function iniciarPose() {
-    // Versiones fijadas para evitar cambios de API entre builds
-    const MP_CAM  = 'https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1640029074/camera_utils.js';
-    const MP_POSE = 'https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404';
+    offCtx.drawImage(video, 0, 0, CAM_W, CAM_H);
+    const frame = offCtx.getImageData(0, 0, CAM_W, CAM_H);
+    const curr = frame.data;
 
-    await cargarScript(MP_CAM);
-    await cargarScript(`${MP_POSE}/pose.js`);
+    if (!prevFrameData) {
+      prevFrameData = new Uint8ClampedArray(curr);
+      return;
+    }
 
-    // Video oculto para la cámara
-    const videoEl = document.createElement('video');
-    videoEl.style.cssText = 'position:fixed;opacity:0;pointer-events:none;width:1px;height:1px;';
-    document.body.appendChild(videoEl);
+    const cW = CAM_W / GRID_X;
+    const cH = CAM_H / GRID_Y;
+    const zonas = [];
 
-    const pose = new Pose({
-      locateFile: file => `${MP_POSE}/${file}`
-    });
-    pose.setOptions({
-      modelComplexity: 1,
-      smoothLandmarks: true,
-      enableSegmentation: false,
-      smoothSegmentation: false,
-      minDetectionConfidence: 0.5,
-      minTrackingConfidence: 0.5
-    });
+    for (let gy = 0; gy < GRID_Y; gy++) {
+      for (let gx = 0; gx < GRID_X; gx++) {
+        let difAcum = 0, count = 0;
+        const px0 = Math.floor(gx * cW), px1 = Math.floor((gx + 1) * cW);
+        const py0 = Math.floor(gy * cH), py1 = Math.floor((gy + 1) * cH);
 
-    let bodyPrevSX = null, bodyPrevSY = null, bodyPrevT = performance.now();
-    let framesAusente = 0;
-
-    pose.onResults(results => {
-      if (!results.poseLandmarks) {
-        framesAusente++;
-        // ~1.5s sin cuerpo → apagar gesto
-        if (framesAusente > 45) {
-          soltarGesto();
-          hoverWorldX = null;
-          hoverWorldY = null;
-          setCamEstado('#C4943D', 'esperando');
+        for (let py = py0; py < py1; py++) {
+          for (let px = px0; px < px1; px++) {
+            const i = (py * CAM_W + px) * 4;
+            difAcum += (Math.abs(curr[i]   - prevFrameData[i])   +
+                        Math.abs(curr[i+1] - prevFrameData[i+1]) +
+                        Math.abs(curr[i+2] - prevFrameData[i+2])) / 3;
+            count++;
+          }
         }
-        return;
+
+        const media = difAcum / count;
+        if (media > UMBRAL) {
+          // Espejo en X (cámara devuelve imagen especular)
+          const sx = (1 - (gx + 0.5) / GRID_X) * W;
+          const sy = ((gy + 0.5) / GRID_Y) * H;
+          const w = screenToWorld(sx, sy);
+          zonas.push({ wx: w.x, wy: w.y, intensidad: Math.min(1, (media - UMBRAL) / 80) });
+        }
       }
+    }
 
-      framesAusente = 0;
-      setCamEstado('#1D9E75', 'cuerpo activo');
+    prevFrameData = new Uint8ClampedArray(curr);
 
-      // Centro de hombros (landmarks 11 y 12)
-      const l11 = results.poseLandmarks[11];
-      const l12 = results.poseLandmarks[12];
-      const normX = (l11.x + l12.x) / 2;
-      const normY = (l11.y + l12.y) / 2;
-
-      // Mirror X (imagen especular de cámara) → mapear a pantalla
-      const sx = (1 - normX) * W;
-      const sy = normY * H;
-
-      // Calcular velocidad del cuerpo para dispersion por movimiento rápido
-      const ahora = performance.now();
-      if (bodyPrevSX !== null) {
-        const dvx = sx - bodyPrevSX, dvy = sy - bodyPrevSY;
-        const ddt = Math.max(1, ahora - bodyPrevT);
-        const v = Math.sqrt(dvx * dvx + dvy * dvy) / ddt * 1000;
-        mouseVel = mouseVel * 0.6 + v * 0.4;
-        ultimoMouseTime = ahora;
-      }
-      mousePrevX = sx; mousePrevY = sy;
-      bodyPrevSX = sx; bodyPrevSY = sy; bodyPrevT = ahora;
-
-      // tactil=true → radio de influencia mayor (cuerpo ≠ cursor)
-      const eraActivo = gesto.activo;
-      const w = actualizarGesto(sx, sy, true, false, true);
-      hoverWorldX = w.x;
-      hoverWorldY = w.y;
-
-      // Dispersión inicial al entrar en frame
-      if (!eraActivo) gesto.dispersion = 0.35;
-    });
-
-    const camera = new Camera(videoEl, {
-      onFrame: async () => { await pose.send({ image: videoEl }); },
-      width: 640,
-      height: 480
-    });
-
-    setCamEstado('#C4943D', 'iniciando');
-    await camera.start();
-    setCamEstado('#C4943D', 'esperando');
+    if (zonas.length > 0) {
+      setCamEstado('#1D9E75', 'movimiento');
+      aplicarFuerzas(zonas);
+    } else {
+      setCamEstado('#C4943D', 'en espera');
+    }
   }
 
-  iniciarPose().catch(err => {
-    console.error('[proyección] error cámara:', err);
-    setCamEstado('#8B0000', 'error cámara');
+  async function iniciarDeteccion() {
+    setCamEstado('#C4943D', 'iniciando');
+
+    const video = document.createElement('video');
+    video.autoplay = true; video.playsInline = true;
+    video.style.cssText = 'position:fixed;opacity:0;pointer-events:none;width:1px;height:1px;';
+    document.body.appendChild(video);
+
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 320, height: 240, facingMode: 'user' }
+      });
+    } catch (err) {
+      setCamEstado('#8B0000', 'error cámara');
+      console.error('[proyección] cámara no disponible:', err);
+      return;
+    }
+
+    video.srcObject = stream;
+    await new Promise(r => { video.onloadedmetadata = r; });
+    video.play();
+
+    setCamEstado('#C4943D', 'en espera');
+
+    // 20fps de análisis — suficiente para movimiento, liviano para CPU
+    setInterval(() => detectarMovimiento(video), 50);
+  }
+
+  iniciarDeteccion().catch(err => {
+    setCamEstado('#8B0000', 'error');
+    console.error('[proyección]', err);
   });
 }
 </script>
