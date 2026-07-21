@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Espéculo(ar) — galaxia</title>
+<title>Espéculo(ar) | galaxia</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital@0;1&display=swap');
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -69,6 +69,78 @@
     filter: blur(4.2px) saturate(1.24) contrast(1.12) brightness(1.08);
     opacity: 1;
   }
+
+  /* ── BOTÓN DE AUDIO ──
+     Misma esfera que el toggle de categorías, pero con motivo de
+     anillos concéntricos (ondas sonoras). Apagado: gris, inerte.
+     Activo: colores del sistema, glow, respiración lenta. */
+  .audio-toggle {
+    display: block; pointer-events: auto; cursor: pointer;
+    width: 46px; height: 46px; border-radius: 50%; border: 0;
+    flex: 0 0 auto; position: relative; overflow: visible;
+    background: transparent;
+    isolation: isolate;
+    transform: translateZ(0);
+  }
+  .audio-toggle::before,
+  .audio-toggle::after {
+    content: ""; position: absolute; border-radius: 50%;
+    pointer-events: none;
+  }
+  .audio-toggle::before {
+    inset: 4px;
+    background:
+      radial-gradient(circle at 50% 50%,
+        rgba(158,158,158,0.30) 0 8%,
+        transparent 14%,
+        rgba(158,158,158,0.20) 22%, transparent 30%,
+        rgba(158,158,158,0.13) 40%, transparent 50%,
+        rgba(158,158,158,0.07) 62%, transparent 74%);
+    filter: blur(1.6px) saturate(0.4);
+    box-shadow:
+      inset -7px -8px 12px rgba(8,8,12,0.36),
+      inset 5px 5px 10px rgba(255,255,255,0.08);
+    opacity: 0.55;
+    mix-blend-mode: screen;
+    transition: opacity 0.3s ease, filter 0.3s ease;
+  }
+  .audio-toggle::after {
+    inset: -7px;
+    background: radial-gradient(circle, rgba(158,158,158,0.10), transparent 57%);
+    filter: blur(8px);
+    opacity: 0.4;
+    z-index: -1;
+    transition: opacity 0.3s ease, background 0.3s ease;
+  }
+  body.audio-activo .audio-toggle::before {
+    background:
+      radial-gradient(circle at 50% 50%,
+        rgba(245,221,44,0.85) 0 8%,
+        transparent 14%,
+        rgba(46,196,216,0.55) 22%, transparent 30%,
+        rgba(184,20,232,0.42) 40%, transparent 50%,
+        rgba(232,147,90,0.30) 62%, transparent 74%);
+    filter: blur(1.8px) saturate(1.2) contrast(1.08);
+    box-shadow:
+      inset -7px -8px 12px rgba(8,8,12,0.36),
+      inset 5px 5px 10px rgba(255,255,255,0.16),
+      0 0 13px rgba(245,221,44,0.12),
+      0 0 22px rgba(46,196,216,0.16);
+    opacity: 0.96;
+    animation: audioRespira 4.5s ease-in-out infinite;
+  }
+  body.audio-activo .audio-toggle::after {
+    background:
+      radial-gradient(circle at 45% 40%, rgba(245,221,44,0.16), transparent 38%),
+      radial-gradient(circle at 58% 62%, rgba(46,196,216,0.16), transparent 44%),
+      radial-gradient(circle, rgba(255,255,255,0.07), transparent 57%);
+    opacity: 0.75;
+  }
+  @keyframes audioRespira {
+    0%, 100% { transform: scale(1); opacity: 0.96; }
+    50% { transform: scale(1.045); opacity: 1; }
+  }
+
   .leyenda {
     position: absolute; left: 1.8rem; bottom: 5.35rem;
     display: flex; flex-wrap: wrap; gap: 8px 14px;
@@ -219,7 +291,7 @@
   <div class="header-bar">
     <div>
       <div class="titulo">ESPÉCULO(AR)</div>
-      <div class="subtitulo">galaxia colectiva · tecnologías de género</div>
+      <div class="subtitulo">galaxia colectiva</div>
     </div>
     <div class="contador">
       <div class="n-respuestas" id="n-respuestas">—</div>
@@ -228,6 +300,7 @@
   </div>
   <div class="footer-bar">
     <button class="leyenda-toggle" id="leyenda-toggle" type="button" aria-label="mostrar categorías" aria-expanded="false"></button>
+    <button class="audio-toggle" id="audio-toggle" type="button" aria-label="activar sonido" aria-pressed="false" title="sonido"></button>
     <div class="leyenda" id="leyenda"></div>
     <div class="estado">
       <span class="estado-dot" id="estado-dot"></span>
@@ -553,6 +626,7 @@ const RADIO_CHISPA = 16;
 const OPACIDAD_CHISPA = 0.28;
 const DURACION_AGITACION = 2800;
 const DURACION_INTEGRACION = 9000;
+const DURACION_INGRESO = 18000;   // viaje de aproximación de pintitas nuevas (ms)
 
 const COHESION_DIST = 245;
 const COHESION_FUERZA = 0.00055;
@@ -611,11 +685,17 @@ class Pintita {
     this.vx = (Math.random() - 0.5) * 0.5;
     this.vy = (Math.random() - 0.5) * 0.5;
 
+    this.esNueva = esNueva;
     if (esNueva) {
+      // Ingreso dramático: nace muy lejos del corpus (1.7x el radio del
+      // mundo) y viaja lentamente hacia él durante DURACION_INGRESO ms.
       const a = Math.random() * Math.PI * 2;
-      const r = maxR * 1.1;
+      const r = maxR * 1.7;
       this.x = Math.cos(a) * r;
       this.y = Math.sin(a) * r;
+      // Velocidad inicial apuntando al centro, lenta
+      this.vx = -Math.cos(a) * 0.35;
+      this.vy = -Math.sin(a) * 0.35;
     }
 
     this.opacidadFiltro = 1;
@@ -722,6 +802,17 @@ class Pintita {
       const pull = exceso * 0.0006;
       ax -= (this.x / distCentro) * pull;
       ay -= (this.y / distCentro) * pull;
+    }
+
+    // INGRESO DRAMÁTICO: durante los primeros DURACION_INGRESO ms,
+    // la pintita nueva siente una atracción suave y constante hacia el
+    // corpus. Viaja sola, visible, hasta integrarse al flocking normal.
+    // El umbral distCentro > maxR * 0.6 corta la atracción cuando ya
+    // llegó a la zona del corpus, evitando que atraviese hasta el centro.
+    if (this.esNueva && this.edad < DURACION_INGRESO && distCentro > maxR * 0.6) {
+      const pullIngreso = 0.010 * (1 - this.edad / DURACION_INGRESO);
+      ax -= (this.x / distCentro) * pullIngreso;
+      ay -= (this.y / distCentro) * pullIngreso;
     }
 
     const wsLento = 0.0024, wtLento = 0.00018;
@@ -1037,8 +1128,11 @@ function render() {
   for (const p of pintitas) {
     if (p.opacidadFiltro < 0.005) continue;
     const fAgit = p.tiempoAgitacion / DURACION_AGITACION;
-    const fEdad = Math.max(0, 1 - p.edad / DURACION_INTEGRACION);
-    const chispa = Math.max(fAgit, fEdad * 0.85);
+    // Pintitas en ingreso dramático: chispa plena durante el viaje,
+    // luego fade normal de integración
+    const enIngreso = p.esNueva && p.edad < DURACION_INGRESO;
+    const fEdad = enIngreso ? 1.0 : Math.max(0, 1 - p.edad / DURACION_INTEGRACION);
+    const chispa = Math.max(fAgit, fEdad * (enIngreso ? 1.0 : 0.85));
     if (chispa < 0.03) continue;
 
     const sx = (p.x - cam.x) * cam.scale + W / 2;
@@ -1282,6 +1376,168 @@ canvas.addEventListener('touchend', async (e) => {
 // Pointer events removidos — los touch events con tactil=true manejan todo
 
 // ============================================================
+// AUDIO — sonido de ingreso de nuevas pintitas
+// Sistema armónico sobre 231 Hz (fundamental del proyecto):
+//   - Sub-bajo físico: 57.75 Hz (231/4, dos octavas abajo).
+//     Vibración corporal en parlantes con respuesta de graves.
+//   - Tono por categoría: ratios justos sobre 231 Hz.
+//     Un relato que activa varias categorías produce un acorde
+//     escalonado, siempre consonante con el sub.
+// El audio se activa ÚNICAMENTE con el botón (audio-toggle).
+// El click en el botón cuenta como gesto de usuario y desbloquea
+// el AudioContext (política de autoplay de los navegadores).
+// Parámetro URL opcional: ?audio=on → para instalación, deja el
+// sistema preparado y lo activa con el primer toque en pantalla.
+// ============================================================
+const FREQ_BASE = 231;
+const FREQ_SUB = FREQ_BASE / 4; // 57.75 Hz
+
+const FREQ_CATEGORIA = {
+  'dolor_fisico':         FREQ_BASE * 1,        // 231.0  — fundamental
+  'miedo':                FREQ_BASE * 9 / 8,    // 259.9  — segunda mayor, tensión
+  'verguenza_exposicion': FREQ_BASE * 6 / 5,    // 277.2  — tercera menor
+  'sensaciones_frias':    FREQ_BASE * 4 / 3,    // 308.0  — cuarta justa
+  'sensaciones_calidas':  FREQ_BASE * 3 / 2,    // 346.5  — quinta justa, estable
+  'sonido':               FREQ_BASE * 8 / 5,    // 369.6  — sexta menor
+  'aromas':               FREQ_BASE * 5 / 3,    // 385.0  — sexta mayor
+  'violencia_sexual':     FREQ_BASE * 16 / 9,   // 410.7  — séptima menor, la más tensa
+  'placer_deseo':         FREQ_BASE * 15 / 8,   // 433.1  — séptima mayor, brillante
+  'profesional_hombre':   FREQ_BASE * 3 / 4,    // 173.25 — bajo la fundamental
+  'profesional_mujer':    FREQ_BASE * 5 / 4,    // 288.75 — tercera mayor
+};
+
+let audioCtx = null;
+let audioMaster = null;
+let audioHabilitado = false;   // el usuario decide con el botón
+
+function inicializarAudio() {
+  if (audioCtx) return;
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    audioMaster = audioCtx.createGain();
+    audioMaster.gain.value = 0.9;
+    audioMaster.connect(audioCtx.destination);
+  } catch (e) {
+    console.warn('Audio no disponible:', e);
+  }
+}
+
+// Sub-bajo profundo: 57.75 Hz, ataque lento, cola larga.
+// Se siente más de lo que se escucha.
+function sonarSub(t0) {
+  if (!audioCtx) return;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = 'sine';
+  osc.frequency.value = FREQ_SUB;
+
+  gain.gain.setValueAtTime(0.0001, t0);
+  gain.gain.exponentialRampToValueAtTime(0.55, t0 + 0.35);   // ataque 350ms
+  gain.gain.exponentialRampToValueAtTime(0.18, t0 + 2.2);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 5.5);  // cola 5.5s
+
+  osc.connect(gain);
+  gain.connect(audioMaster);
+  osc.start(t0);
+  osc.stop(t0 + 5.7);
+}
+
+// Tono por categoría: senoidal con leve segunda armónica,
+// ataque suave, resonancia media. Como campana lejana.
+function sonarTono(freq, t0, ganancia = 0.22) {
+  if (!audioCtx) return;
+  const osc1 = audioCtx.createOscillator();
+  const osc2 = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  const gain2 = audioCtx.createGain();
+
+  osc1.type = 'sine';
+  osc1.frequency.value = freq;
+  osc2.type = 'sine';
+  osc2.frequency.value = freq * 2;   // octava superior, muy tenue
+  gain2.gain.value = 0.18;
+
+  gain.gain.setValueAtTime(0.0001, t0);
+  gain.gain.exponentialRampToValueAtTime(ganancia, t0 + 0.18);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 3.8);
+
+  osc1.connect(gain);
+  osc2.connect(gain2);
+  gain2.connect(gain);
+  gain.connect(audioMaster);
+  osc1.start(t0); osc2.start(t0);
+  osc1.stop(t0 + 4.0); osc2.stop(t0 + 4.0);
+}
+
+// Sonido completo de ingreso de un relato:
+// 1 sub + un tono por cada categoría activada, escalonados 180ms.
+// Recibe array de categorías (strings).
+function sonidoIngreso(categorias) {
+  if (!audioHabilitado) return;
+  if (!audioCtx || audioCtx.state !== 'running') return;
+  const t0 = audioCtx.currentTime + 0.05;
+  sonarSub(t0);
+  categorias.forEach((cat, i) => {
+    const freq = FREQ_CATEGORIA[cat];
+    if (freq) sonarTono(freq, t0 + 0.4 + i * 0.18);
+  });
+}
+
+function activarAudio() {
+  audioHabilitado = true;
+  inicializarAudio();
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  // Confirmación sonora sutil: un tono de 231 Hz, breve y suave
+  if (audioCtx) {
+    const t0 = audioCtx.currentTime + 0.05;
+    sonarTono(FREQ_BASE, t0, 0.12);
+  }
+  document.body.classList.add('audio-activo');
+  const btn = document.getElementById('audio-toggle');
+  if (btn) {
+    btn.setAttribute('aria-pressed', 'true');
+    btn.setAttribute('aria-label', 'silenciar sonido');
+  }
+}
+
+function desactivarAudio() {
+  audioHabilitado = false;
+  document.body.classList.remove('audio-activo');
+  const btn = document.getElementById('audio-toggle');
+  if (btn) {
+    btn.setAttribute('aria-pressed', 'false');
+    btn.setAttribute('aria-label', 'activar sonido');
+  }
+}
+
+const audioToggle = document.getElementById('audio-toggle');
+if (audioToggle) {
+  audioToggle.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (audioHabilitado) desactivarAudio();
+    else activarAudio();
+  });
+  audioToggle.addEventListener('touchstart', (e) => {
+    e.stopPropagation();
+  }, { passive: true });
+}
+
+// Modo instalación: ?audio=on activa el audio con el primer
+// toque/click en cualquier parte (un solo gesto al montar).
+if (new URLSearchParams(window.location.search).get('audio') === 'on') {
+  const activarUnaVez = () => {
+    if (!audioHabilitado) activarAudio();
+    window.removeEventListener('pointerdown', activarUnaVez, true);
+    window.removeEventListener('touchstart', activarUnaVez, true);
+    window.removeEventListener('keydown', activarUnaVez, true);
+  };
+  window.addEventListener('pointerdown', activarUnaVez, true);
+  window.addEventListener('touchstart', activarUnaVez, true);
+  window.addEventListener('keydown', activarUnaVez, true);
+}
+
+// ============================================================
 // MODAL
 // ============================================================
 let _relatoOriginal = '';
@@ -1434,14 +1690,29 @@ async function consultarNuevas() {
     const data = await res.json();
     const nuevas = data.filter(p => p.id > ultimaPintitaId);
     nuevas.reverse();
+    // Agrupar pintitas nuevas por respuesta: un relato genera varias
+    // pintitas (una por categoría activada). El sonido se dispara UNA
+    // vez por relato, con el acorde de todas sus categorías.
+    const porRespuesta = new Map();
     for (const p of nuevas) {
       if (!pintitasMap.has(p.id)) {
+        if (!porRespuesta.has(p.respuesta_id)) porRespuesta.set(p.respuesta_id, []);
+        porRespuesta.get(p.respuesta_id).push(p);
+      }
+    }
+    for (const [respId, grupo] of porRespuesta) {
+      const delayBase = Math.random() * 1500;
+      // Sonido: un acorde por relato con todas sus categorías
+      const categorias = grupo.map(p => p.categoria);
+      setTimeout(() => sonidoIngreso(categorias), delayBase);
+      // Pintitas del grupo entran escalonadas tras el sonido
+      grupo.forEach((p, i) => {
         setTimeout(() => {
           pintitas.push(new Pintita(p.id, p.respuesta_id, p.categoria, true));
           pintitasMap.set(p.id, true);
-        }, Math.random() * 1500);
+        }, delayBase + 400 + i * 350);
         if (p.id > ultimaPintitaId) ultimaPintitaId = p.id;
-      }
+      });
     }
     actualizarEstado();
   } catch(e) { marcarSinConexion(); }
