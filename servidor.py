@@ -3,6 +3,7 @@ from flask_cors import CORS
 import json
 import os
 import re
+import unicodedata
 import urllib.request
 import urllib.error
 import psycopg2
@@ -83,9 +84,25 @@ CATEGORIAS = {
             'me dejó cagada','me sacaron la mugre',
             'ardía horrores','horrible dolor',
             'me partió','me rajó',
+            'dolores','escozor','picazón','picazon','picor',
+            'ardiente','lacerada','lacerado','laceraciones',
+            'apuñalada','apuñalado','estocada','puñalada',
+            'me retorcía de dolor','contorsión','contorsionaba',
+            'malestar físico','malestar fisico',
+            'molestia física','molestia fisica',
+            'me quejé de dolor','quejido de dolor',
+            'tironeo','tironeaba',
+            'me sacó un grito','grité de dolor',
+            'insufrible','punzadas agudas',
             'hurt','hurts','pain','painful',
             'ache','aching','bleeding','bleed',
-            'burning','cramp','wound','cut','bruise'
+            'burning','cramp','wound','cut','bruise',
+            'stinging','throbbing','sore','soreness',
+            'agony','agonizing','excruciating',
+            'tender','tenderness','bruised','bruising',
+            'wounded','scraped','scratch','scratching',
+            'stab','stabbing','piercing','laceration',
+            'discomfort','uncomfortable','unbearable'
         ]
     },
     'miedo': {
@@ -131,10 +148,25 @@ CATEGORIAS = {
             'quería escapar','no podía respirar bien',
             'me puse histérica','los nervios a flor de piel',
             'me latía a mil','no podía parar de temblar',
+            'temeroso','temerosa','aprensivo',
+            'consternada','consternado','consternación',
+            'pavor','pavoroso','inseguridad','insegura','inseguro',
+            'alarmada','alarmado','alarma','sobresalto',
+            'sobresaltada','sobresaltado',
+            'me heló la sangre','se me heló la sangre',
+            'me quedé sin aire','no podía moverme',
+            'quedé paralizada','quedé paralizado',
+            'me tiritaba la voz','voz entrecortada','entrecortada',
+            'inquietante','desasosiego','desasosegada',
+            'recelo','recelosa','desconfianza','desconfiada',
             'fear','anxiety','panic','terror',
             'scared','nervous','dread','worried',
             'frightened','terrified','paralyzed',
-            'trembling','shaking'
+            'trembling','shaking',
+            'apprehension','apprehensive','uneasy','uneasiness',
+            'startled','alarm','alarmed','trembled',
+            'freeze','froze','frozen','petrified','dreaded',
+            'distress','distressed','jittery'
         ]
     },
     'verguenza_exposicion': {
@@ -172,11 +204,26 @@ CATEGORIAS = {
             'quería desaparecer',
             'quería que me tragara la tierra',
             'me quería morir de vergüenza',
+            'bochorno','bochornoso','turbada','turbado','turbación',
+            'sonrojo','sonrojada','sonrojado',
+            'ruborizada','ruborizado','rubor',
+            'desprotegida','desprotegido','desprotección',
+            'indefensa','indefenso','desamparada','desamparo',
+            'tratada como objeto','como pieza de carne',
+            'trato deshumanizante','sin dignidad',
+            'despersonalizada','despersonalizado',
+            'cero privacidad','ninguna privacidad','nula privacidad',
+            'me sentí un número','me sentí un numero',
+            'solo un número','me sentí cosa','como mercancía',
             'shame','ashamed','embarrassed',
             'exposed','naked','vulnerable',
             'humiliation','humiliated',
             'objectified','scrutinized',
-            'privacy','intimate'
+            'privacy','intimate',
+            'mortified','mortification','blush','blushing',
+            'undignified','dehumanizing','dehumanized',
+            'stared at','on display','specimen',
+            'scrutiny','self-conscious'
         ]
     },
     'sensaciones_frias': {
@@ -231,10 +278,16 @@ CATEGORIAS = {
             'como una trampa',
             'frío a cagarse','me cagué de frío',
             'me llegó frío hasta los huesos',
+            'entumecida','entumecido','entumecimiento',
+            'adormecida','adormecido',
+            'anestesiada','anestesiado','anestesia local',
+            'insensibilizada','distanciamiento','frialdad clínica',
             'cold','freezing','metallic','steel',
             'rigid','icy','frozen','hard',
             'sharp','clinical','sterile',
-            'instrument','morgue','cadaver'
+            'instrument','morgue','cadaver',
+            'numb','numbness','sterilized','stainless',
+            'chilly','chill','frosty','detached'
         ]
     },
     'sensaciones_calidas': {
@@ -281,11 +334,20 @@ CATEGORIAS = {
             'flexible','maleable',
             'reconfortante','confortable',
             'a gusto','agusto',
+            'entrañable','protector','protectora','protección',
+            'resguardada','resguardado','resguardo',
+            'arropada','arropado','abrazo','abrazada','abrazado',
+            'contención emocional','sostén','sostenida','sostenido',
+            'acompañada','acompañado','acompañamiento',
+            'seguridad emocional',
             'warm','soft','gentle',
             'rubber','cotton',
             'comfortable','soothing','smooth',
             'care','kindness','empathy',
-            'warmth','tenderness','affection'
+            'warmth','tenderness','affection',
+            'nurturing','protective','supportive',
+            'embrace','embraced','held','wrapped',
+            'cared for','looked after'
         ]
     },
     'sonido': {
@@ -348,10 +410,15 @@ CATEGORIAS = {
             'retumbaba','resonaba',
             'sonaba feo','sonaba horrible',
             'hacía un ruido','estridente',
+            'traqueteando','vibrando','pitido agudo',
+            'sonido chirriante','estruendoso','ensordecedor',
+            'apagado','amortiguado','sonido sordo','ruido sordo',
             'sound','noise','click','clang','scrape',
             'creak','squeak','rattle',
             'buzz','hum','vibration',
-            'silence','heard','listening'
+            'silence','heard','listening',
+            'muffled','deafening','screeching','beeping',
+            'thud','thump','tapping','rustling'
         ]
     },
     'aromas': {
@@ -395,9 +462,14 @@ CATEGORIAS = {
             'alcantarilla','alcantarillado',
             'aguas servidas','desagüe','cañería',
             'perfume','jabón','floral',
+            'inodoro','penetrante','acre','rancidez',
+            'vaho','tufo','hedores',
+            'olor a hospital','olor hospitalario',
             'smell','scent','odor',
             'antiseptic','alcohol','chemical','organic',
-            'stench','fragrance','rotten','putrid','sewage'
+            'stench','fragrance','rotten','putrid','sewage',
+            'pungent','acrid','musty','reek','reeking',
+            'whiff','odorless'
         ]
     },
     'violencia_sexual': {
@@ -446,13 +518,23 @@ CATEGORIAS = {
             'victimización','víctima',
             'me pasó a llevar','me faltó el respeto',
             'se mandó un abuso','me vulneró','me hizo algo',
+            'violentación','vejatorio','vejatoria',
+            'denigrante','denigrada','denigrado',
+            'cosificación sexual','violencia obstétrica',
+            'maltrato obstétrico','trato denigrante',
+            'sin mi permiso','en contra de mi voluntad',
+            'contra mi voluntad','me obligaron','me forzaron',
+            'forzada','forzado','abuso de autoridad médica',
             'assault','sexual abuse',
             'without consent','harassment',
             'groped','violated','molested',
             'inappropriate contact',
             'non-consensual','coercion',
             'sexual trauma','abuse of power',
-            'exploitation','predatory'
+            'exploitation','predatory',
+            'obstetric violence','forced','forcibly',
+            'against my will','degrading',
+            'non-consensual touching','misconduct','coerced'
         ]
     },
     'placer_deseo': {
@@ -476,7 +558,15 @@ CATEGORIAS = {
             'pleasure','pleasurable',
             'orgasm','erotic',
             'sensual','arousal',
-            'desire','enjoyment'
+            'desire','enjoyment','la pasé bien','fascinada','entretenido','entretenida','me encantó','gozo','amado','amor','maravilloso',
+            'complacencia','autoconocimiento','conexión con mi cuerpo',
+            'empoderada','empoderado','empoderamiento',
+            'disfrute','disfruté','disfrutar',
+            'satisfacción','satisfactorio','satisfactoria',
+            'libertad corporal','plenitud',
+            'satisfaction','satisfying','empowered','empowerment',
+            'enjoyed','enjoyable','fulfilling',
+            'bodily autonomy','pleasurable experience'
         ]
     },
     'profesional_hombre': {
@@ -484,7 +574,7 @@ CATEGORIAS = {
         'nombre_es': 'profesional hombre',
         'nombre_en': 'male professional',
         'palabras': [
-            'médico','doctor',
+            'médico',
             'ginecólogo','obstetra',
             'urólogo','anestesiólogo',
             'enfermero','radiólogo','ecografista',
@@ -493,7 +583,11 @@ CATEGORIAS = {
             'matrón','secretario','el tens',
             'especialista hombre',
             'el médico','el doctor',
-            'el ginecólogo','el anestesista'
+            'el ginecólogo','el anestesista',
+            'facultativo','cirujano','kinesiólogo',
+            'male doctor','male physician',
+            'male gynecologist','male obstetrician',
+            'male nurse','man doctor','he was my doctor'
         ]
     },
     'profesional_mujer': {
@@ -512,9 +606,45 @@ CATEGORIAS = {
             'especialista mujer',
             'la médica','la medica',
             'la doctora','la ginecóloga',
-            'la anestesista'
+            'la anestesista',
+            'facultativa','cirujana','kinesióloga',
+            'female doctor','female physician',
+            'female gynecologist','female obstetrician',
+            'female nurse','woman doctor','midwife','doula'
         ]
     }
+}
+
+# ============================================================
+# NORMALIZACIÓN DE TILDES
+# El corpus llega con ortografía inconsistente: mismo hablante puede
+# escribir "dolió" o "dolio", "vergüenza" o "verguenza". Sin esto,
+# el clasificador solo detecta la forma exacta que quedó tipeada en
+# el diccionario, y pierde todas las variantes sin tilde.
+# Se normaliza tanto el texto del relato como cada palabra del
+# diccionario antes de comparar, así ambos quedan en el mismo
+# alfabeto y coinciden sin importar si el relato llevaba tildes.
+# La ñ se protege explícitamente: NFKD la descompone en "n" + tilde
+# combinante, y removerla la convertiría en "n" común, lo cual es un
+# error de fondo (año / ano son palabras distintas, no una acentuada
+# y otra no).
+# ============================================================
+def quitar_tildes(texto):
+    texto = texto.replace('ñ', '\x00').replace('Ñ', '\x01')
+    descompuesto = unicodedata.normalize('NFKD', texto)
+    sin_tildes = ''.join(c for c in descompuesto if not unicodedata.combining(c))
+    return sin_tildes.replace('\x00', 'ñ').replace('\x01', 'Ñ')
+
+# Patrones precompilados por categoría, calculados una sola vez al
+# iniciar el servidor. Cada palabra del diccionario se normaliza y
+# se compila con límite de palabra, para no volver a hacerlo en cada
+# relato que llega por el webhook.
+_PATRONES_CATEGORIA = {
+    cat: [
+        re.compile(r'(?<!\w)' + re.escape(quitar_tildes(palabra.lower())) + r'(?!\w)')
+        for palabra in datos['palabras']
+    ]
+    for cat, datos in CATEGORIAS.items()
 }
 
 # ============================================================
@@ -590,13 +720,10 @@ def traducir_relato(texto):
 # ANÁLISIS SEMÁNTICO
 # ============================================================
 def analizar_relato(texto):
-    texto_lower = texto.lower()
+    texto_normalizado = quitar_tildes(texto.lower())
     resultado = {}
-    for cat, datos in CATEGORIAS.items():
-        menciones = sum(
-            1 for p in datos['palabras']
-            if re.search(r'(?<!\w)' + re.escape(p) + r'(?!\w)', texto_lower)
-        )
+    for cat, patrones in _PATRONES_CATEGORIA.items():
+        menciones = sum(1 for patron in patrones if patron.search(texto_normalizado))
         if menciones > 0:
             palabras_texto = max(1, len(texto.split()))
             intensidad = min(1.0, menciones / max(1, palabras_texto / 20))
