@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Espéculo(ar)</title>
+<title>Espéculo(ar) — galaxia</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital@0;1&display=swap');
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -308,7 +308,7 @@
   <div class="header-bar">
     <div>
       <div class="titulo">ESPÉCULO(AR)</div>
-      <div class="subtitulo">galaxia colectiva</div>
+      <div class="subtitulo">galaxia colectiva · tecnologías de género</div>
     </div>
     <div class="contador">
       <div class="n-respuestas" id="n-respuestas">—</div>
@@ -713,3 +713,1720 @@ for (const [cat, info] of Object.entries(CATEGORIAS)) {
   gradChispa[cat] = crearGradienteChispa(rgb);
   gradMancha[cat] = crearGradienteMancha(rgb);
 }
+
+// ============================================================
+// PINTITA
+// ============================================================
+const BLOB_RADIO_BASE = 19;
+const BLOB_ALPHA = 0.42;
+const BLUR_PX = 12;
+const CONTRAST_AMOUNT = 3.35;
+const RADIO_CHISPA = 16;
+const OPACIDAD_CHISPA = 0.28;
+const DURACION_AGITACION = 2800;
+const DURACION_INTEGRACION = 9000;
+const DURACION_INGRESO = 26000;   // viaje de aproximación de pintitas nuevas (ms)
+
+const COHESION_DIST = 245;
+const COHESION_FUERZA = 0.00055;
+const REPULSION_CERCANA_DIST = 32;
+const REPULSION_CERCANA_FUERZA = 0.046;
+const SEPARACION_SUAVE_DIST = 96;
+const SEPARACION_SUAVE_FUERZA = 0.0028;
+const FLUJO_ORGANICO_FUERZA = 0.018;
+const ORBITA_FUERZA = 0.0045;
+
+function escalaVisualMovil() {
+  return H > W * 1.2 ? 1.06 : 1;
+}
+
+function usarDifusionMovil() {
+  return H > W * 1.2 || /iPad|iPhone|iPod/.test(navigator.userAgent);
+}
+
+class Pintita {
+  constructor(id, respId, cat, esNueva = false) {
+    this.id = id;
+    this.respuestaId = respId;
+    this.categoria = cat;
+    this.colorVisual = CATEGORIAS[cat]?.color || '#888888';
+    this.gradChispa = gradChispa[cat] || crearGradienteChispa(hexToRgb('#888888'));
+    this.gradMancha = gradMancha[cat] || crearGradienteMancha(hexToRgb('#888888'));
+
+    const tamRand = Math.pow(Math.random(), 0.7);
+    this.tamFactor = 0.55 + tamRand * 1.95;
+    this.opacFactor = 0.78 + Math.random() * 0.5;
+
+    this.brushAngle = Math.random() * Math.PI * 2;
+    this.brushAngleVel = (Math.random() - 0.5) * 0.00040;
+    const elongation = 0.9 + Math.random() * 1.9;
+    this.particles = [];
+    const nP = 6 + Math.floor(Math.random() * 5);
+    for (let i = 0; i < nP; i++) {
+      const t = nP > 1 ? (i / (nP - 1) - 0.5) * 1.6 : 0;
+      const radial = Math.pow(Math.random(), 0.72) * 0.85;
+      const a = Math.random() * Math.PI * 2;
+      this.particles.push({
+        along: t * elongation + Math.cos(a) * radial * 0.72,
+        perp: (Math.random() - 0.5) * 0.60 + Math.sin(a) * radial,
+        size: 0.40 + Math.random() * 0.62,
+        aspect: 0.68 + Math.random() * 1.34,
+        rot: Math.random() * Math.PI * 2,
+        alpha: 0.78 + Math.random() * 0.42,
+      });
+    }
+
+    const maxR = getWorldRadius();
+    const angulo = Math.random() * Math.PI * 2;
+    const radio = Math.sqrt(Math.random()) * maxR * 0.75;
+    this.x = Math.cos(angulo) * radio;
+    this.y = Math.sin(angulo) * radio;
+    this.vx = (Math.random() - 0.5) * 0.5;
+    this.vy = (Math.random() - 0.5) * 0.5;
+
+    this.esNueva = esNueva;
+    if (esNueva) {
+      // Ingreso dramático: nace muy lejos del corpus (1.7x el radio del
+      // mundo) y viaja lentamente hacia él durante DURACION_INGRESO ms.
+      const a = Math.random() * Math.PI * 2;
+      const r = maxR * 1.7;
+      this.x = Math.cos(a) * r;
+      this.y = Math.sin(a) * r;
+      // Velocidad inicial apuntando al centro, pausada
+      this.vx = -Math.cos(a) * 0.22;
+      this.vy = -Math.sin(a) * 0.22;
+    }
+
+    this.opacidadFiltro = 1;
+    this.opacidadFiltroObjetivo = filtrosActivos[cat] ? 1 : 0;
+    this.fase = Math.random() * Math.PI * 2;
+    this.velFase = 0.0005 + Math.random() * 0.001;
+    this.tiempoAgitacion = 0;
+    this.edad = esNueva ? 0 : DURACION_INTEGRACION + 1;
+  }
+
+  actualizar(dt, hwx, hwy, mouseVel, vecinos, isDragging, input) {
+    this.edad += dt;
+    this.fase += this.velFase * dt;
+    this.brushAngle += this.brushAngleVel * dt;
+
+    if (this.tiempoAgitacion > 0)
+      this.tiempoAgitacion = Math.max(0, this.tiempoAgitacion - dt);
+
+    let ax = 0, ay = 0;
+    let crowdCx = 0, crowdCy = 0, crowdN = 0;
+    const CROWD_DIST = 85;
+    const CROWD_DIST2 = CROWD_DIST * CROWD_DIST;
+
+    for (const o of vecinos) {
+      if (o === this) continue;
+      const dx = o.x - this.x;
+      const dy = o.y - this.y;
+      const dist2 = dx * dx + dy * dy;
+      if (dist2 < 0.1) continue;
+      const dist = Math.sqrt(dist2);
+
+      if (dist2 < CROWD_DIST2) {
+        crowdCx += o.x;
+        crowdCy += o.y;
+        crowdN++;
+      }
+
+      if (dist < COHESION_DIST && dist > SEPARACION_SUAVE_DIST) {
+        const f = COHESION_FUERZA * (1 - dist / COHESION_DIST);
+        ax += (dx / dist) * f;
+        ay += (dy / dist) * f;
+      }
+      if (dist < SEPARACION_SUAVE_DIST) {
+        const f = SEPARACION_SUAVE_FUERZA * (SEPARACION_SUAVE_DIST - dist) / SEPARACION_SUAVE_DIST;
+        ax -= (dx / dist) * f;
+        ay -= (dy / dist) * f;
+      }
+      if (dist < REPULSION_CERCANA_DIST) {
+        const f = REPULSION_CERCANA_FUERZA * (REPULSION_CERCANA_DIST - dist) / REPULSION_CERCANA_DIST;
+        ax -= (dx / dist) * f;
+        ay -= (dy / dist) * f;
+      }
+    }
+
+    const CROWD_UMBRAL = 14;
+    if (crowdN > CROWD_UMBRAL) {
+      crowdCx /= crowdN;
+      crowdCy /= crowdN;
+      let dxC = this.x - crowdCx;
+      let dyC = this.y - crowdCy;
+      let dC = Math.sqrt(dxC * dxC + dyC * dyC);
+      if (dC < 1) {
+        const a = Math.random() * Math.PI * 2;
+        dxC = Math.cos(a); dyC = Math.sin(a); dC = 1;
+      }
+      const fPresion = (crowdN - CROWD_UMBRAL) * 0.0022;
+      ax += (dxC / dC) * fPresion;
+      ay += (dyC / dC) * fPresion;
+    }
+
+    if (input?.activo && input.x !== null) {
+      const dx = this.x - input.x;
+      const dy = this.y - input.y;
+      const dist2 = dx * dx + dy * dy;
+      const rInfl = (190 + input.mezcla * 135 + input.dispersion * (input.tactil ? 155 : 95)) / Math.max(0.1, cam.scale);
+      if (dist2 < rInfl * rInfl && dist2 > 1) {
+        const dist = Math.sqrt(dist2);
+        const fd = (rInfl - dist) / rInfl;
+        const invDistX = dx / dist;
+        const invDistY = dy / dist;
+
+        const disper = input.dispersion * fd * (input.tactil ? 1.05 : 0.62);
+        ax += invDistX * disper;
+        ay += invDistY * disper;
+
+        const mezcla = input.presionado ? input.mezcla * fd : 0;
+        ax -= invDistX * mezcla * 0.045;
+        ay -= invDistY * mezcla * 0.045;
+        ax += input.vx * mezcla * 0.018;
+        ay += input.vy * mezcla * 0.018;
+
+        const remolino = mezcla * 0.060 * Math.sin(this.fase + tiempoGlobal * 0.002);
+        ax += -invDistY * remolino;
+        ay += invDistX * remolino;
+
+        if (disper > 0.04) this.tiempoAgitacion = DURACION_AGITACION;
+      }
+    }
+
+    const distCentro = Math.sqrt(this.x * this.x + this.y * this.y);
+    const maxR = getWorldRadius();
+    if (distCentro > maxR * 1.2 && distCentro > 0.1) {
+      const exceso = distCentro - maxR * 1.2;
+      const pull = exceso * 0.0006;
+      ax -= (this.x / distCentro) * pull;
+      ay -= (this.y / distCentro) * pull;
+    }
+
+    // INGRESO DRAMÁTICO: durante los primeros DURACION_INGRESO ms,
+    // la pintita nueva siente una atracción suave y constante hacia el
+    // corpus. Viaja sola, pausada, visible, hasta integrarse al flocking.
+    // El umbral distCentro > maxR * 0.6 corta la atracción cuando ya
+    // llegó a la zona del corpus, evitando que atraviese hasta el centro.
+    if (this.esNueva && this.edad < DURACION_INGRESO && distCentro > maxR * 0.6) {
+      const pullIngreso = 0.0062 * (1 - this.edad / DURACION_INGRESO);
+      ax -= (this.x / distCentro) * pullIngreso;
+      ay -= (this.y / distCentro) * pullIngreso;
+    }
+
+    const wsLento = 0.0024, wtLento = 0.00018;
+    const wsRapid = 0.0085, wtRapid = 0.00042;
+    const windX =
+      Math.sin(this.x * wsLento + tiempoGlobal * wtLento) * 0.70 +
+      Math.sin(this.x * wsRapid + this.y * 0.005 + tiempoGlobal * wtRapid + 1.3) * 0.30;
+    const windY =
+      Math.cos(this.y * wsLento + tiempoGlobal * wtLento * 1.13) * 0.70 +
+      Math.cos(this.y * wsRapid + this.x * 0.005 + tiempoGlobal * wtRapid * 1.21 + 0.7) * 0.30;
+    const flujoX =
+      windX +
+      Math.sin((this.y - this.x) * 0.0038 + tiempoGlobal * 0.00031) * 0.55 +
+      Math.cos(this.y * 0.010 + tiempoGlobal * 0.00023 + this.fase) * 0.22;
+    const flujoY =
+      windY +
+      Math.cos((this.x + this.y) * 0.0032 + tiempoGlobal * 0.00029) * 0.55 +
+      Math.sin(this.x * 0.010 + tiempoGlobal * 0.00025 + this.fase) * 0.22;
+    ax += flujoX * FLUJO_ORGANICO_FUERZA;
+    ay += flujoY * FLUJO_ORGANICO_FUERZA;
+
+    if (distCentro > 8) {
+      const giro = Math.sin(tiempoGlobal * 0.00018 + distCentro * 0.006) * ORBITA_FUERZA;
+      ax += (-this.y / distCentro) * giro;
+      ay += (this.x / distCentro) * giro;
+    }
+
+    ax += (Math.random() - 0.5) * 0.010;
+    ay += (Math.random() - 0.5) * 0.010;
+
+    const accMax = 0.08;
+    const a2 = ax * ax + ay * ay;
+    if (a2 > accMax * accMax) {
+      const a = Math.sqrt(a2);
+      ax = (ax / a) * accMax;
+      ay = (ay / a) * accMax;
+    }
+
+    this.vx = (this.vx + ax) * 0.982;
+    this.vy = (this.vy + ay) * 0.982;
+
+    // Durante el viaje de ingreso la velocidad máxima se limita:
+    // trayectoria pausada, protagónica, fácil de seguir con la vista
+    const velMax = (this.esNueva && this.edad < DURACION_INGRESO) ? 0.85 : 1.9;
+    const v2 = this.vx * this.vx + this.vy * this.vy;
+    if (v2 > velMax * velMax) {
+      const v = Math.sqrt(v2);
+      this.vx = (this.vx / v) * velMax;
+      this.vy = (this.vy / v) * velMax;
+    }
+
+    this.x += this.vx;
+    this.y += this.vy;
+
+    this.opacidadFiltro += (this.opacidadFiltroObjetivo - this.opacidadFiltro) * 0.05;
+  }
+
+  contieneEnMundo(wx, wy) {
+    const dx = wx - this.x;
+    const dy = wy - this.y;
+    const r = BLOB_RADIO_BASE * escalaVisualMovil() * this.tamFactor * 1.4;
+    return dx * dx + dy * dy < r * r;
+  }
+}
+
+// ============================================================
+// SPATIAL HASH
+// ============================================================
+const CELL_SIZE = 360;
+let spatialHash = new Map();
+
+function rebuildSpatialHash() {
+  spatialHash.clear();
+  for (const p of pintitas) {
+    const cx = Math.floor(p.x / CELL_SIZE);
+    const cy = Math.floor(p.y / CELL_SIZE);
+    const key = cx * 100000 + cy;
+    let cell = spatialHash.get(key);
+    if (!cell) { cell = []; spatialHash.set(key, cell); }
+    cell.push(p);
+  }
+}
+
+function getVecinos(x, y) {
+  const cx = Math.floor(x / CELL_SIZE);
+  const cy = Math.floor(y / CELL_SIZE);
+  const vecinos = [];
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      const key = (cx + dx) * 100000 + (cy + dy);
+      const cell = spatialHash.get(key);
+      if (cell) vecinos.push(...cell);
+    }
+  }
+  return vecinos;
+}
+
+// ============================================================
+// ESTADO GLOBAL
+// ============================================================
+const pintitas = [];
+const pintitasMap = new Map();
+
+let tiempoGlobal = 0;
+let ultimoTiempo = performance.now();
+
+let mouseVel = 0;
+let mousePrevX = null, mousePrevY = null;
+let ultimoMouseTime = performance.now();
+let hoverWorldX = null, hoverWorldY = null;
+
+const gesto = {
+  activo: false,
+  x: null, y: null,
+  vx: 0, vy: 0,
+  speed: 0,
+  path: 0,
+  direct: 0,
+  jitter: 0,
+  mezcla: 0,
+  dispersion: 0,
+  presionado: false,
+  tactil: false,
+  ultimoT: performance.now(),
+  inicioX: null, inicioY: null,
+  prevX: null, prevY: null,
+  prevDirX: 0, prevDirY: 0,
+};
+
+let isDragging = false;
+let dragStartSX = 0, dragStartSY = 0;
+let dragDistance = 0;
+
+function actualizarGesto(sx, sy, activo = true, presionado = false, tactil = false) {
+  const ahora = performance.now();
+  const w = screenToWorld(sx, sy);
+  const dt = Math.max(1, ahora - gesto.ultimoT);
+
+  if (!gesto.activo || gesto.prevX === null || !activo) {
+    gesto.activo = activo;
+    gesto.presionado = presionado;
+    gesto.tactil = tactil;
+    gesto.x = w.x; gesto.y = w.y;
+    gesto.prevX = w.x; gesto.prevY = w.y;
+    gesto.inicioX = w.x; gesto.inicioY = w.y;
+    gesto.vx = 0; gesto.vy = 0;
+    gesto.speed = 0; gesto.path = 0; gesto.direct = 0;
+    gesto.jitter *= 0.8;
+    gesto.mezcla *= 0.8;
+    gesto.dispersion *= 0.8;
+    gesto.ultimoT = ahora;
+    return w;
+  }
+
+  const dx = w.x - gesto.prevX;
+  const dy = w.y - gesto.prevY;
+  const d = Math.sqrt(dx * dx + dy * dy);
+  const speed = d / dt * 1000;
+  const dirX = d > 0.001 ? dx / d : gesto.prevDirX;
+  const dirY = d > 0.001 ? dy / d : gesto.prevDirY;
+  const giro = 1 - Math.max(-1, Math.min(1, dirX * gesto.prevDirX + dirY * gesto.prevDirY));
+
+  gesto.path = Math.min(900, gesto.path * 0.985 + d);
+  gesto.direct = Math.sqrt((w.x - gesto.inicioX) ** 2 + (w.y - gesto.inicioY) ** 2);
+  gesto.jitter = Math.min(1, gesto.jitter * 0.88 + giro * Math.min(1, speed / 520) * 0.55);
+  const mezclaGestual = presionado
+    ? Math.min(1, gesto.path / 360) * (1 - gesto.jitter * 0.72) * 0.095
+    : 0;
+  const sacudidaMouse = presionado ? 0 : Math.max(0, Math.min(1, (speed - 520) / 720)) * 0.16;
+  const arrastreTactil = tactil ? Math.min(1, speed / 300) * 0.18 + Math.min(1, d / 28) * 0.055 : 0;
+  gesto.mezcla = Math.min(1, gesto.mezcla * 0.93 + mezclaGestual);
+  gesto.dispersion = Math.min(1, gesto.dispersion * 0.88 + gesto.jitter * Math.min(1, speed / 420) * 0.18 + sacudidaMouse + arrastreTactil);
+  gesto.x = w.x; gesto.y = w.y;
+  gesto.vx = dx / dt * 16.67;
+  gesto.vy = dy / dt * 16.67;
+  gesto.speed = speed;
+  gesto.prevX = w.x; gesto.prevY = w.y;
+  gesto.prevDirX = dirX; gesto.prevDirY = dirY;
+  gesto.presionado = presionado;
+  gesto.tactil = tactil;
+  gesto.ultimoT = ahora;
+  return w;
+}
+
+function soltarGesto() {
+  gesto.activo = false;
+  gesto.prevX = null;
+  gesto.prevY = null;
+  gesto.path = 0;
+  gesto.direct = 0;
+  gesto.presionado = false;
+  gesto.tactil = false;
+}
+
+// ============================================================
+// AUDIO PROCEDURAL
+// Fusión de dos capas, según indicación de Dayvid Bustamante:
+//
+// 1) CAPA BASAL (bordón): las primeras voces de la serie armónica
+//    de 231 Hz suenan de forma permanente (57.75, 115.5, 231, 462,
+//    693, 924, 1155, 1386). Cada voz tiene un LFO de amplitud propio,
+//    con periodo y profundidad aleatorios: los volúmenes suben y
+//    bajan de manera descorrelacionada y la capa nunca suena plana.
+//    Un filtro lowpass con LFO espectral lento le da respiración
+//    tímbrica; el perfil de la categoría dominante del corpus modula
+//    ese timbre (brillo, resonancia, carácter metálico) sin alterar
+//    las alturas, que quedan ancladas a la serie de 231.
+//
+// 2) INGRESOS: cada pintita nueva toma el siguiente armónico de la
+//    serie (231 x n, ciclando del 1 al 16) y entra con volumen
+//    reforzado, más refuerzo mientras más agudo (los parciales altos
+//    se perciben menos). Decae en ~7.5 s y se funde con la capa.
+//    Un sub de 57.75 Hz da el golpe físico, una vez por relato.
+//
+// 3) COLISIONES: pintitas que se rozan en el corpus disparan pulsos
+//    breves con el timbre de su categoría, paneados según su posición.
+//
+// El audio se activa con el botón (requisito de gesto de usuario de
+// los navegadores). Parámetro ?audio=on: modo instalación, se activa
+// con el primer toque en pantalla.
+// ============================================================
+const FREQ_BASE = 231;
+const FREQ_SUB = FREQ_BASE / 4;      // 57.75 Hz
+const ARMONICOS_SERIE = 16;          // la serie de ingresos cicla del 1 al 16
+const DRONE_PARCIALES = [
+  // [multiplo de 231, ganancia base]
+  [0.25, 0.26],   // 57.75 Hz : sub
+  [0.5,  0.15],   // 115.5 Hz
+  [1,    0.115],  // 231 Hz : fundamental
+  [2,    0.072],  // 462
+  [3,    0.048],  // 693
+  [4,    0.034],  // 924
+  [5,    0.023],  // 1155
+  [6,    0.015],  // 1386
+];
+let contadorIngresos = 0;
+
+const audioSistema = {
+  ctx: null,
+  master: null,
+  compresor: null,
+  droneGain: null,
+  pulseBus: null,
+  filtro: null,
+  lfoFiltro: null,
+  lfoFiltroGain: null,
+  voces: [],
+  activo: false,
+  categoriaDominante: 'sensaciones_frias',
+  ultimoPulso: -Infinity,
+  scanIndex: 0,
+  cooldownPares: new Map(),
+};
+
+function audioDisponible() {
+  return window.AudioContext || window.webkitAudioContext;
+}
+
+function crearAudioSiHaceFalta() {
+  if (audioSistema.ctx || !audioDisponible()) return !!audioSistema.ctx;
+  const AudioCtx = audioDisponible();
+  const ctxAudio = new AudioCtx();
+
+  // Compresor de seguridad: evita clipping cuando coinciden varios
+  // ingresos con la capa basal y los pulsos de colisión
+  const compresor = ctxAudio.createDynamicsCompressor();
+  compresor.threshold.value = -18;
+  compresor.knee.value = 24;
+  compresor.ratio.value = 6;
+  compresor.attack.value = 0.006;
+  compresor.release.value = 0.28;
+  compresor.connect(ctxAudio.destination);
+
+  const master = ctxAudio.createGain();
+  master.gain.value = 0;               // silencio hasta activar
+  master.connect(compresor);
+
+  // Filtro del bordón: lowpass con LFO espectral lento (Codex)
+  const filtro = ctxAudio.createBiquadFilter();
+  filtro.type = 'lowpass';
+  filtro.frequency.value = 760;
+  filtro.Q.value = 1.1;
+
+  const droneGain = ctxAudio.createGain();
+  droneGain.gain.value = 0.42;
+  filtro.connect(droneGain);
+  droneGain.connect(master);
+
+  // Voces del bordón: serie armónica de 231, cada una con su LFO
+  // de amplitud aleatorio e independiente (fluctuación orgánica)
+  const voces = DRONE_PARCIALES.map(([mult, gBase], i) => {
+    const osc = ctxAudio.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = FREQ_BASE * mult;
+    osc.detune.value = (Math.random() - 0.5) * 10;   // leve grosor
+
+    const g = ctxAudio.createGain();
+    g.gain.value = gBase;
+
+    const lfo = ctxAudio.createOscillator();
+    lfo.type = 'sine';
+    lfo.frequency.value = 0.04 + Math.random() * 0.12;   // ciclo de 8 a 25 s
+    const lfoDepth = ctxAudio.createGain();
+    lfoDepth.gain.value = gBase * (0.30 + Math.random() * 0.25);
+    lfo.connect(lfoDepth);
+    lfoDepth.connect(g.gain);
+
+    osc.connect(g);
+    g.connect(filtro);
+    osc.start();
+    lfo.start();
+    return { mult, osc, g, gBase };
+  });
+
+  // LFO del filtro: respiración espectral del bordón
+  const lfoFiltro = ctxAudio.createOscillator();
+  const lfoFiltroGain = ctxAudio.createGain();
+  lfoFiltro.type = 'sine';
+  lfoFiltro.frequency.value = 0.045;
+  lfoFiltroGain.gain.value = 220;
+  lfoFiltro.connect(lfoFiltroGain);
+  lfoFiltroGain.connect(filtro.frequency);
+  lfoFiltro.start();
+
+  // Bus de pulsos (colisiones) con delay y retroalimentación suave
+  const pulseBus = ctxAudio.createGain();
+  pulseBus.gain.value = 1.35;
+  pulseBus.connect(master);
+
+  const delay = ctxAudio.createDelay(0.8);
+  const feedback = ctxAudio.createGain();
+  delay.delayTime.value = 0.18;
+  feedback.gain.value = 0.16;
+  pulseBus.connect(delay);
+  delay.connect(feedback);
+  feedback.connect(delay);
+  delay.connect(master);
+
+  Object.assign(audioSistema, {
+    ctx: ctxAudio,
+    master,
+    compresor,
+    droneGain,
+    pulseBus,
+    filtro,
+    lfoFiltro,
+    lfoFiltroGain,
+    voces,
+  });
+  aplicarPerfilAudio(audioSistema.categoriaDominante);
+  return true;
+}
+
+// El perfil por categoría dominante modula SOLO el timbre del bordón
+// (filtro, resonancia, respiración espectral, presencia). Las alturas
+// no cambian: quedan ancladas a la serie de 231 para mantenerse
+// consonantes con los armónicos de ingreso.
+function aplicarPerfilAudio(cat) {
+  if (!audioSistema.ctx) return;
+  const perfil = AUDIO_POR_CATEGORIA[cat] || AUDIO_POR_CATEGORIA.sensaciones_frias;
+  const ahora = audioSistema.ctx.currentTime;
+  audioSistema.filtro.frequency.cancelScheduledValues(ahora);
+  audioSistema.filtro.frequency.setTargetAtTime(perfil.filtro, ahora, 1.8);
+  audioSistema.filtro.Q.setTargetAtTime(perfil.q, ahora, 1.4);
+  audioSistema.lfoFiltroGain.gain.setTargetAtTime(150 + perfil.metal * 320, ahora, 1.8);
+  audioSistema.droneGain.gain.setTargetAtTime(0.42 + perfil.metal * 0.10, ahora, 1.2);
+}
+
+function actualizarCategoriaAudio(cat) {
+  if (!cat || cat === audioSistema.categoriaDominante) return;
+  audioSistema.categoriaDominante = cat;
+  aplicarPerfilAudio(cat);
+}
+
+// Confirmación al activar: tres alturas de la serie (fundamental,
+// quinta, octava), breves y suaves
+function pulsoActivacionAudio() {
+  if (!audioSistema.ctx || audioSistema.ctx.state !== 'running') return;
+  const ctxAudio = audioSistema.ctx;
+  const ahora = ctxAudio.currentTime;
+  [FREQ_BASE, FREQ_BASE * 1.5, FREQ_BASE * 2].forEach((freq, i) => {
+    const osc = ctxAudio.createOscillator();
+    const gain = ctxAudio.createGain();
+    const filtro = ctxAudio.createBiquadFilter();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, ahora + i * 0.055);
+    filtro.type = 'lowpass';
+    filtro.frequency.value = 1200;
+    filtro.Q.value = 0.8;
+    gain.gain.setValueAtTime(0.0001, ahora + i * 0.055);
+    gain.gain.exponentialRampToValueAtTime(0.095, ahora + i * 0.055 + 0.014);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ahora + i * 0.055 + 0.22);
+    osc.connect(filtro);
+    filtro.connect(gain);
+    gain.connect(audioSistema.pulseBus);
+    osc.start(ahora + i * 0.055);
+    osc.stop(ahora + i * 0.055 + 0.25);
+    osc.onended = () => {
+      osc.disconnect();
+      filtro.disconnect();
+      gain.disconnect();
+    };
+  });
+}
+
+async function alternarAudio() {
+  const btn = document.getElementById('audio-toggle');
+  if (!audioSistema.activo) {
+    if (!crearAudioSiHaceFalta()) return;
+    try { await audioSistema.ctx.resume(); } catch (e) {}
+    const ahora = audioSistema.ctx.currentTime;
+    audioSistema.master.gain.cancelScheduledValues(ahora);
+    audioSistema.master.gain.setValueAtTime(Math.max(0.0001, audioSistema.master.gain.value), ahora);
+    audioSistema.master.gain.exponentialRampToValueAtTime(0.62, ahora + 0.10);
+    audioSistema.master.gain.setTargetAtTime(0.54, ahora + 0.18, 0.9);
+    audioSistema.activo = true;
+    document.body.classList.add('audio-activo');
+    btn?.setAttribute('aria-pressed', 'true');
+    btn?.setAttribute('aria-label', 'silenciar sonido');
+    pulsoActivacionAudio();
+  } else {
+    const ahora = audioSistema.ctx.currentTime;
+    audioSistema.master.gain.cancelScheduledValues(ahora);
+    audioSistema.master.gain.setTargetAtTime(0.0001, ahora, 0.45);
+    audioSistema.activo = false;
+    document.body.classList.remove('audio-activo');
+    btn?.setAttribute('aria-pressed', 'false');
+    btn?.setAttribute('aria-label', 'activar sonido');
+  }
+}
+
+// Swell de ingreso: el armónico propio de la pintita (231 x armN)
+// entra con volumen reforzado y decae en ~7.5 s. El refuerzo crece
+// con el número de armónico: compensación perceptual de los agudos.
+function swellIngreso(armN) {
+  if (!audioSistema.activo || !audioSistema.ctx || audioSistema.ctx.state !== 'running') return;
+  const ctxAudio = audioSistema.ctx;
+  const t0 = ctxAudio.currentTime + 0.03;
+  const osc = ctxAudio.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.value = FREQ_BASE * armN;
+  osc.detune.value = (Math.random() - 0.5) * 12;   // +-6 cents: dos pintitas nunca idénticas
+
+  const g = ctxAudio.createGain();
+  const pico = Math.min(0.5, 0.16 + 0.022 * armN);
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(pico, t0 + 0.12);
+  g.gain.exponentialRampToValueAtTime(pico * 0.4, t0 + 1.4);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 7.5);
+
+  osc.connect(g);
+  g.connect(audioSistema.master);
+  osc.start(t0);
+  osc.stop(t0 + 7.7);
+  osc.onended = () => { osc.disconnect(); g.disconnect(); };
+
+  // Si el armónico coincide con una voz del bordón, esa voz se realza
+  // temporalmente: la pintita se funde con la capa basal
+  const voz = audioSistema.voces.find(v => Math.abs(v.mult - armN) < 0.01);
+  if (voz) {
+    const tv = ctxAudio.currentTime;
+    voz.g.gain.cancelScheduledValues(tv);
+    voz.g.gain.setValueAtTime(Math.max(voz.g.gain.value, voz.gBase), tv);
+    voz.g.gain.linearRampToValueAtTime(voz.gBase * 2.2, tv + 0.4);
+    voz.g.gain.linearRampToValueAtTime(voz.gBase, tv + 6.0);
+  }
+}
+
+// Golpe físico grave: 57.75 Hz, una vez por relato. Se siente más
+// de lo que se escucha en parlantes con respuesta de graves.
+function subPulsoIngreso() {
+  if (!audioSistema.activo || !audioSistema.ctx || audioSistema.ctx.state !== 'running') return;
+  const ctxAudio = audioSistema.ctx;
+  const t0 = ctxAudio.currentTime + 0.03;
+  const osc = ctxAudio.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.value = FREQ_SUB;
+  const g = ctxAudio.createGain();
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(0.5, t0 + 0.30);
+  g.gain.exponentialRampToValueAtTime(0.18, t0 + 2.0);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 5.2);
+  osc.connect(g);
+  g.connect(audioSistema.master);
+  osc.start(t0);
+  osc.stop(t0 + 5.4);
+  osc.onended = () => { osc.disconnect(); g.disconnect(); };
+}
+
+// Pulso de colisión (Codex): timbre según la categoría, paneo
+// estéreo según la posición horizontal en el mundo
+function dispararPulsoAudio(cat, intensidad = 0.45, worldX = 0) {
+  if (!audioSistema.activo || !audioSistema.ctx || audioSistema.ctx.state !== 'running') return;
+  const perfil = AUDIO_POR_CATEGORIA[cat] || AUDIO_POR_CATEGORIA.sensaciones_frias;
+  const ctxAudio = audioSistema.ctx;
+  const ahora = ctxAudio.currentTime;
+  const vida = 0.18 + perfil.metal * 0.10 + intensidad * 0.08;
+  const osc = ctxAudio.createOscillator();
+  const gain = ctxAudio.createGain();
+  const filtro = ctxAudio.createBiquadFilter();
+  const pan = ctxAudio.createStereoPanner ? ctxAudio.createStereoPanner() : null;
+
+  osc.type = perfil.metal > 0.55 ? 'triangle' : 'sine';
+  osc.frequency.setValueAtTime(perfil.pulso * (0.92 + Math.random() * 0.18), ahora);
+  osc.frequency.exponentialRampToValueAtTime(Math.max(42, perfil.pulso * (0.62 + perfil.metal * 0.12)), ahora + vida);
+  filtro.type = perfil.metal > 0.45 ? 'bandpass' : 'lowpass';
+  filtro.frequency.value = perfil.pulso * (1.6 + perfil.metal * 2.4);
+  filtro.Q.value = perfil.q + intensidad * 2.2;
+  gain.gain.setValueAtTime(0.0001, ahora);
+  gain.gain.exponentialRampToValueAtTime(0.045 + intensidad * 0.120, ahora + 0.012);
+  gain.gain.exponentialRampToValueAtTime(0.0001, ahora + vida);
+
+  osc.connect(filtro);
+  filtro.connect(gain);
+  if (pan) {
+    const mundo = Math.max(1, getWorldRadius());
+    pan.pan.value = Math.max(-0.75, Math.min(0.75, (worldX - cam.x) / mundo));
+    gain.connect(pan);
+    pan.connect(audioSistema.pulseBus);
+  } else {
+    gain.connect(audioSistema.pulseBus);
+  }
+
+  osc.start(ahora);
+  osc.stop(ahora + vida + 0.05);
+  osc.onended = () => {
+    osc.disconnect();
+    filtro.disconnect();
+    gain.disconnect();
+    if (pan) pan.disconnect();
+  };
+
+  if (perfil.metal > 0.36 && Math.random() < perfil.metal) {
+    const dur = 0.075 + perfil.metal * 0.045;
+    const buffer = ctxAudio.createBuffer(1, Math.floor(ctxAudio.sampleRate * dur), ctxAudio.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < data.length; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 2.6);
+    }
+    const noise = ctxAudio.createBufferSource();
+    const nGain = ctxAudio.createGain();
+    const nFilter = ctxAudio.createBiquadFilter();
+    noise.buffer = buffer;
+    nFilter.type = 'highpass';
+    nFilter.frequency.value = 900 + perfil.metal * 1800;
+    nGain.gain.setValueAtTime(0.0001, ahora);
+    nGain.gain.exponentialRampToValueAtTime(0.026 + intensidad * 0.045, ahora + 0.008);
+    nGain.gain.exponentialRampToValueAtTime(0.0001, ahora + dur);
+    noise.connect(nFilter);
+    nFilter.connect(nGain);
+    nGain.connect(audioSistema.pulseBus);
+    noise.start(ahora);
+    noise.stop(ahora + dur + 0.02);
+    noise.onended = () => {
+      noise.disconnect();
+      nFilter.disconnect();
+      nGain.disconnect();
+    };
+  }
+}
+
+// Colisiones (Codex): detecta pintitas que se rozan y dispara pulsos
+// con cooldown por par, muestreando el corpus de forma incremental
+function detectarColapsosAudio() {
+  if (!audioSistema.activo || !audioSistema.ctx || pintitas.length < 2) return;
+  if (tiempoGlobal - audioSistema.ultimoPulso < 95) return;
+  const muestras = Math.min(150, pintitas.length);
+  let disparados = 0;
+  for (let n = 0; n < muestras && disparados < 2; n++) {
+    const idx = (audioSistema.scanIndex + n) % pintitas.length;
+    const p = pintitas[idx];
+    if (!p || p.opacidadFiltro < 0.45) continue;
+    const vecinos = getVecinos(p.x, p.y);
+    for (const o of vecinos) {
+      if (o === p || o.id <= p.id || o.opacidadFiltro < 0.45) continue;
+      const dx = o.x - p.x;
+      const dy = o.y - p.y;
+      const dist2 = dx * dx + dy * dy;
+      const umbral = BLOB_RADIO_BASE * (1.2 + (p.tamFactor + o.tamFactor) * 0.24);
+      if (dist2 > umbral * umbral) continue;
+      if (p.categoria !== o.categoria && Math.random() > 0.18) continue;
+      const key = `${p.id}:${o.id}`;
+      if ((audioSistema.cooldownPares.get(key) || 0) > tiempoGlobal) continue;
+      const dist = Math.sqrt(dist2);
+      const intensidad = Math.max(0.16, 1 - dist / umbral) * (p.categoria === o.categoria ? 1 : 0.68);
+      audioSistema.cooldownPares.set(key, tiempoGlobal + 1500 + Math.random() * 1800);
+      audioSistema.ultimoPulso = tiempoGlobal;
+      dispararPulsoAudio(p.categoria, intensidad, (p.x + o.x) * 0.5);
+      disparados++;
+      break;
+    }
+  }
+  audioSistema.scanIndex = (audioSistema.scanIndex + muestras) % Math.max(1, pintitas.length);
+  if (audioSistema.cooldownPares.size > 900) {
+    for (const [key, vence] of audioSistema.cooldownPares) {
+      if (vence < tiempoGlobal) audioSistema.cooldownPares.delete(key);
+      if (audioSistema.cooldownPares.size <= 520) break;
+    }
+  }
+}
+
+// Modo instalación: ?audio=on activa el audio con el primer
+// toque/click en cualquier parte (un solo gesto al montar)
+if (new URLSearchParams(window.location.search).get('audio') === 'on') {
+  const activarUnaVez = () => {
+    if (!audioSistema.activo) alternarAudio();
+    window.removeEventListener('pointerdown', activarUnaVez, true);
+    window.removeEventListener('touchstart', activarUnaVez, true);
+    window.removeEventListener('keydown', activarUnaVez, true);
+  };
+  window.addEventListener('pointerdown', activarUnaVez, true);
+  window.addEventListener('touchstart', activarUnaVez, true);
+  window.addEventListener('keydown', activarUnaVez, true);
+}
+
+// ============================================================
+// DESTELLOS DE INGRESO (supernova sutil)
+// Cada pintita nueva dispara un destello: halo con su color en el
+// punto de aparición + velo global cálido muy tenue sobre toda la
+// pantalla. Decae en ~1.7 s con easing cuadrático.
+// ============================================================
+const flashes = [];
+const FLASH_DURACION = 1700;
+
+function dispararFlash(pintita) {
+  flashes.push({ p: pintita, inicio: performance.now() });
+}
+
+// ============================================================
+// RENDER LOOP
+// ============================================================
+function render() {
+  const ahora = performance.now();
+  const dt = Math.min(50, ahora - ultimoTiempo);
+  ultimoTiempo = ahora;
+  tiempoGlobal += dt;
+
+  const lerp = 0.12;
+  cam.x += (cam.tx - cam.x) * lerp;
+  cam.y += (cam.ty - cam.y) * lerp;
+  cam.scale += (cam.tscale - cam.scale) * lerp;
+
+  mouseVel *= Math.pow(0.92, dt / 16);
+  const decay = Math.pow(0.92, dt / 16);
+  gesto.mezcla *= decay;
+  gesto.dispersion *= decay;
+  gesto.jitter *= Math.pow(0.90, dt / 16);
+
+  const resp = Math.sin(tiempoGlobal * 0.00045);
+
+  rebuildSpatialHash();
+  for (const p of pintitas) {
+    const vecinos = getVecinos(p.x, p.y);
+    p.actualizar(dt, hoverWorldX, hoverWorldY, mouseVel, vecinos, isDragging, gesto);
+  }
+  detectarColapsosAudio();
+
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.clearRect(0, 0, W, H);
+  if (tiempoGlobal - ultimoFondoAtmosferico > FONDO_ATMOSFERA_INTERVALO) {
+    fondoCtx.clearRect(0, 0, W, H);
+    dibujarFondoAtmosferico(fondoCtx);
+    ultimoFondoAtmosferico = tiempoGlobal;
+  }
+  ctx.drawImage(fondoCanvas, 0, 0, W, H);
+
+  // CAPA 1: METABALL FLUIDO
+  fluidoCtx.clearRect(0, 0, W, H);
+  fluidoCtx.globalCompositeOperation = 'source-over';
+
+  for (const p of pintitas) {
+    if (p.opacidadFiltro < 0.005) continue;
+
+    const sx = (p.x - cam.x) * cam.scale + W / 2;
+    const sy = (p.y - cam.y) * cam.scale + H / 2;
+
+    const escalaResp = Math.sqrt(p.tamFactor);
+    const respProp = Math.sin(p.fase) * 0.9 * escalaResp;
+    const respGlob = resp * 1.2 * escalaResp;
+    const radioMundo = BLOB_RADIO_BASE * escalaVisualMovil() * p.tamFactor + respProp + respGlob;
+    const sr = radioMundo * cam.scale;
+
+    const cullMargin = sr * 4 + 40;
+    if (sr < 0.3) continue;
+    if (sx + cullMargin < 0 || sx - cullMargin > W) continue;
+    if (sy + cullMargin < 0 || sy - cullMargin > H) continue;
+
+    const fade = Math.min(1, p.edad / 4500);
+    const alphaBase = BLOB_ALPHA * fade * p.opacidadFiltro * p.opacFactor;
+
+    const cosA = Math.cos(p.brushAngle);
+    const sinA = Math.sin(p.brushAngle);
+    const movil = usarDifusionMovil();
+    for (const part of p.particles) {
+      const px = sx + (part.along * cosA - part.perp * sinA) * sr;
+      const py = sy + (part.along * sinA + part.perp * cosA) * sr;
+      const psize = Math.max(0.5, part.size * sr * 0.85);
+      const drawR = psize * (movil ? 1.95 : 2.10);
+      fluidoCtx.save();
+      fluidoCtx.globalAlpha = alphaBase * part.alpha;
+      fluidoCtx.translate(px, py);
+      fluidoCtx.rotate(p.brushAngle + part.rot);
+      fluidoCtx.scale(part.aspect, 1);
+      fluidoCtx.drawImage(p.gradMancha, -drawR, -drawR, drawR * 2, drawR * 2);
+      fluidoCtx.restore();
+    }
+  }
+  fluidoCtx.globalAlpha = 1;
+
+  if (usarDifusionMovil()) {
+    difusoCtx.clearRect(0, 0, difusoCanvas.width, difusoCanvas.height);
+    difusoCtx.globalAlpha = 1;
+    difusoCtx.drawImage(fluidoCanvas, 0, 0, difusoCanvas.width, difusoCanvas.height);
+    ctx.imageSmoothingEnabled = true;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 0.26;
+    ctx.drawImage(difusoCanvas, 0, 0, W, H);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.drawImage(fluidoCanvas, 0, 0, W, H);
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = 0.045;
+    ctx.drawImage(fluidoCanvas, 0, 0, W, H);
+    ctx.globalAlpha = 1;
+  } else {
+    const blur = Math.min(60, Math.max(3, BLUR_PX * cam.scale));
+    ctx.filter = `blur(${blur}px) contrast(${CONTRAST_AMOUNT})`;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.drawImage(fluidoCanvas, 0, 0, W, H);
+    ctx.filter = 'none';
+  }
+
+  // CAPA INTERMEDIA: grano enmascarado solo a zonas de color
+  if (!granoColorPattern) granoColorPattern = granoMaskCtx.createPattern(granoCanvas, 'repeat');
+  granoMaskCtx.globalCompositeOperation = 'source-over';
+  granoMaskCtx.fillStyle = granoColorPattern;
+  granoMaskCtx.fillRect(0, 0, W, H);
+  granoMaskCtx.globalCompositeOperation = 'destination-in';
+  granoMaskCtx.drawImage(fluidoCanvas, 0, 0, W, H);
+
+  ctx.globalCompositeOperation = 'soft-light';
+  ctx.globalAlpha = usarDifusionMovil() ? GRANO_COLOR_ALPHA_MOVIL : GRANO_COLOR_ALPHA;
+  ctx.drawImage(granoMaskCanvas, 0, 0, W, H);
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+
+  // CAPA 2: CHISPAS
+  ctx.globalCompositeOperation = 'source-over';
+  for (const p of pintitas) {
+    if (p.opacidadFiltro < 0.005) continue;
+    const fAgit = p.tiempoAgitacion / DURACION_AGITACION;
+    // Pintitas en ingreso dramático: chispa plena durante el viaje,
+    // luego fade normal de integración
+    const enIngreso = p.esNueva && p.edad < DURACION_INGRESO;
+    const fEdad = enIngreso ? 1.0 : Math.max(0, 1 - p.edad / DURACION_INTEGRACION);
+    const chispa = Math.max(fAgit, fEdad * (enIngreso ? 1.0 : 0.85));
+    if (chispa < 0.03) continue;
+
+    const sx = (p.x - cam.x) * cam.scale + W / 2;
+    const sy = (p.y - cam.y) * cam.scale + H / 2;
+    const escalaResp = Math.sqrt(p.tamFactor);
+    const radioChispa = RADIO_CHISPA * escalaResp * cam.scale;
+
+    if (sx + radioChispa < 0 || sx - radioChispa > W) continue;
+    if (sy + radioChispa < 0 || sy - radioChispa > H) continue;
+
+    ctx.globalAlpha = OPACIDAD_CHISPA * chispa * p.opacidadFiltro;
+    ctx.drawImage(p.gradChispa,
+      sx - radioChispa, sy - radioChispa,
+      radioChispa * 2, radioChispa * 2);
+  }
+  ctx.globalAlpha = 1;
+
+  // CAPA 3: DESTELLOS DE INGRESO (supernova sutil)
+  if (flashes.length > 0) {
+    const ahoraF = performance.now();
+    let veloGlobal = 0;
+    ctx.globalCompositeOperation = 'screen';
+    for (let i = flashes.length - 1; i >= 0; i--) {
+      const f = flashes[i];
+      const t = (ahoraF - f.inicio) / FLASH_DURACION;
+      if (t >= 1) { flashes.splice(i, 1); continue; }
+      const ease = Math.pow(1 - t, 2.2);
+      veloGlobal += 0.11 * ease;
+      const fsx = (f.p.x - cam.x) * cam.scale + W / 2;
+      const fsy = (f.p.y - cam.y) * cam.scale + H / 2;
+      const radio = Math.max(W, H) * 0.55 * (0.7 + 0.3 * (1 - ease));
+      const rgb = hexToRgb(f.p.colorVisual);
+      const g = ctx.createRadialGradient(fsx, fsy, 0, fsx, fsy, radio);
+      g.addColorStop(0, `rgba(${rgb.r},${rgb.g},${rgb.b},${0.34 * ease})`);
+      g.addColorStop(0.35, `rgba(${rgb.r},${rgb.g},${rgb.b},${0.10 * ease})`);
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, W, H);
+    }
+    if (veloGlobal > 0.001) {
+      ctx.fillStyle = `rgba(252,244,228,${Math.min(0.16, veloGlobal)})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  requestAnimationFrame(render);
+}
+requestAnimationFrame(render);
+
+// ============================================================
+// CONTROLES
+// ============================================================
+
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  const sx = e.clientX - rect.left;
+  const sy = e.clientY - rect.top;
+
+  if (e.ctrlKey || e.metaKey) {
+    const factor = Math.exp(-e.deltaY * 0.012);
+    const newScale = Math.max(cam.MIN_SCALE, Math.min(cam.MAX_SCALE, cam.tscale * factor));
+    const wx = (sx - W / 2) / cam.tscale + cam.tx;
+    const wy = (sy - H / 2) / cam.tscale + cam.ty;
+
+    cam.tscale = newScale;
+    cam.tx = wx - (sx - W / 2) / newScale;
+    cam.ty = wy - (sy - H / 2) / newScale;
+    return;
+  }
+
+  const horizontal = e.shiftKey && Math.abs(e.deltaX) < Math.abs(e.deltaY)
+    ? e.deltaY
+    : e.deltaX;
+  cam.tx += horizontal / cam.scale;
+  cam.ty += e.deltaY / cam.scale;
+  cam.x = cam.tx;
+  cam.y = cam.ty;
+}, { passive: false });
+
+canvas.addEventListener('mousedown', (e) => {
+  isDragging = true;
+  dragDistance = 0;
+  dragStartSX = e.clientX;
+  dragStartSY = e.clientY;
+  const rect = canvas.getBoundingClientRect();
+  const w = actualizarGesto(e.clientX - rect.left, e.clientY - rect.top, true, true, false);
+  hoverWorldX = w.x; hoverWorldY = w.y;
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const sx = e.clientX - rect.left;
+  const sy = e.clientY - rect.top;
+
+  if (isDragging) {
+    const dx = e.clientX - dragStartSX;
+    const dy = e.clientY - dragStartSY;
+    dragDistance += Math.abs(dx) + Math.abs(dy);
+    dragStartSX = e.clientX;
+    dragStartSY = e.clientY;
+    const w = actualizarGesto(sx, sy, true, true, false);
+    hoverWorldX = w.x; hoverWorldY = w.y;
+  } else {
+    if (mousePrevX !== null) {
+      const t = performance.now();
+      const ddt = Math.max(1, t - ultimoMouseTime);
+      const vdx = sx - mousePrevX, vdy = sy - mousePrevY;
+      const v = Math.sqrt(vdx * vdx + vdy * vdy) / ddt * 1000;
+      mouseVel = mouseVel * 0.6 + v * 0.4;
+      ultimoMouseTime = t;
+    }
+    mousePrevX = sx; mousePrevY = sy;
+    const w = actualizarGesto(sx, sy, true, false, false);
+    hoverWorldX = w.x; hoverWorldY = w.y;
+  }
+});
+
+canvas.addEventListener('mouseup', async (e) => {
+  isDragging = false;
+  if (dragDistance < 6) {
+    const rect = canvas.getBoundingClientRect();
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
+    const w = screenToWorld(sx, sy);
+    let target = null, best = Infinity;
+    for (const p of pintitas) {
+      if (p.contieneEnMundo(w.x, w.y)) {
+        const dx = w.x - p.x, dy = w.y - p.y;
+        const d = dx * dx + dy * dy;
+        if (d < best) { best = d; target = p; }
+      }
+    }
+    if (target) await abrirRelato(target.respuestaId);
+  }
+  soltarGesto();
+});
+
+canvas.addEventListener('mouseleave', () => {
+  isDragging = false;
+  hoverWorldX = null;
+  hoverWorldY = null;
+  mouseVel = 0;
+  soltarGesto();
+});
+
+let lastPinchDist = 0;
+let pinchActivo = false;
+let lastPinchCX = 0, lastPinchCY = 0;
+let touchPanStartX = 0, touchPanStartY = 0;
+let touchPanLastX = 0, touchPanLastY = 0;
+let touchDragDist = 0;
+
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  pinchActivo = e.touches.length >= 2;
+  touchDragDist = 0;
+
+  if (e.touches.length === 1) {
+    const t = e.touches[0];
+    touchPanStartX = t.clientX;
+    touchPanStartY = t.clientY;
+    touchPanLastX = t.clientX;
+    touchPanLastY = t.clientY;
+    isDragging = false;
+    const rect = canvas.getBoundingClientRect();
+    const w = actualizarGesto(t.clientX - rect.left, t.clientY - rect.top, true, true, true);
+    hoverWorldX = w.x; hoverWorldY = w.y;
+    prepararMovimientoCelular();
+  } else if (e.touches.length >= 2) {
+    soltarGesto();
+    const t1 = e.touches[0], t2 = e.touches[1];
+    const dx = t2.clientX - t1.clientX, dy = t2.clientY - t1.clientY;
+    lastPinchDist = Math.sqrt(dx * dx + dy * dy);
+    lastPinchCX = (t1.clientX + t2.clientX) / 2;
+    lastPinchCY = (t1.clientY + t2.clientY) / 2;
+    isDragging = false;
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  if (e.touches.length >= 2) {
+    pinchActivo = true;
+    isDragging = false;
+    const t1 = e.touches[0], t2 = e.touches[1];
+    const dx = t2.clientX - t1.clientX, dy = t2.clientY - t1.clientY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const factor = dist / lastPinchDist;
+    const newScale = Math.max(cam.MIN_SCALE, Math.min(cam.MAX_SCALE, cam.tscale * factor));
+    const cx = (t1.clientX + t2.clientX) / 2;
+    const cy = (t1.clientY + t2.clientY) / 2;
+    const wx = (cx - W / 2) / cam.tscale + cam.tx;
+    const wy = (cy - H / 2) / cam.tscale + cam.ty;
+    cam.tscale = newScale;
+    cam.tx = wx - (cx - W / 2) / newScale;
+    cam.ty = wy - (cy - H / 2) / newScale;
+
+    // Pan por desplazamiento del centro entre dedos
+    const panDx = cx - lastPinchCX;
+    const panDy = cy - lastPinchCY;
+    cam.tx -= panDx / cam.tscale;
+    cam.ty -= panDy / cam.tscale;
+    lastPinchCX = cx;
+    lastPinchCY = cy;
+    lastPinchDist = dist;
+  } else if (e.touches.length === 1 && !pinchActivo) {
+    const t = e.touches[0];
+    const dx = t.clientX - touchPanLastX;
+    const dy = t.clientY - touchPanLastY;
+    touchDragDist += Math.abs(dx) + Math.abs(dy);
+
+    touchPanLastX = t.clientX;
+    touchPanLastY = t.clientY;
+
+    const rect = canvas.getBoundingClientRect();
+    const sx = t.clientX - rect.left;
+    const sy = t.clientY - rect.top;
+    if (mousePrevX !== null) {
+      const ahora = performance.now();
+      const ddt = Math.max(1, ahora - ultimoMouseTime);
+      const vdx = sx - mousePrevX, vdy = sy - mousePrevY;
+      const v = Math.sqrt(vdx * vdx + vdy * vdy) / ddt * 1000;
+      mouseVel = mouseVel * 0.6 + v * 0.4;
+      ultimoMouseTime = ahora;
+    }
+    mousePrevX = sx; mousePrevY = sy;
+    const wp = actualizarGesto(sx, sy, true, true, true);
+    hoverWorldX = wp.x; hoverWorldY = wp.y;
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchend', async (e) => {
+  if (e.touches.length === 0) {
+    if (!pinchActivo && touchDragDist < 10) {
+      const rect = canvas.getBoundingClientRect();
+      const sx = touchPanStartX - rect.left;
+      const sy = touchPanStartY - rect.top;
+      const w = screenToWorld(sx, sy);
+      let target = null, best = Infinity;
+      for (const p of pintitas) {
+        if (p.contieneEnMundo(w.x, w.y)) {
+          const dx = w.x - p.x, dy = w.y - p.y;
+          const d = dx * dx + dy * dy;
+          if (d < best) { best = d; target = p; }
+        }
+      }
+      if (target) await abrirRelato(target.respuestaId);
+    }
+    pinchActivo = false;
+    isDragging = false;
+    soltarGesto();
+  } else if (e.touches.length === 1 && pinchActivo) {
+    const t = e.touches[0];
+    touchPanStartX = t.clientX;
+    touchPanStartY = t.clientY;
+    touchPanLastX = t.clientX;
+    touchPanLastY = t.clientY;
+    touchDragDist = 100;
+    pinchActivo = false;
+    isDragging = false;
+    const rect = canvas.getBoundingClientRect();
+    const w = actualizarGesto(t.clientX - rect.left, t.clientY - rect.top, true, true, true);
+    hoverWorldX = w.x; hoverWorldY = w.y;
+  }
+}, { passive: false });
+
+// ============================================================
+// MODAL (con traducción)
+// ============================================================
+let _relatoOriginal = '';
+let _relatoTraducido = null;
+let _mostrandoTraduccion = false;
+
+async function abrirRelato(respuestaId) {
+  try {
+    const res = await fetch(`${API_BASE}/relato/${respuestaId}`);
+    const data = await res.json();
+    if (data.status === 'error') return;
+    _relatoOriginal = data.relato || '(sin contenido)';
+    _relatoTraducido = data.relato_traducido || null;
+    _mostrandoTraduccion = false;
+    document.getElementById('modal-texto').textContent = _relatoOriginal;
+    const btn = document.getElementById('modal-traducir');
+    btn.style.display = data.idioma === 'en' ? 'block' : 'none';
+    btn.textContent = 'ver en español';
+    // categorias_activadas puede llegar como objeto o como lista
+    const catsData = data.categorias_activadas || {};
+    const listaCats = Array.isArray(catsData) ? catsData : Object.keys(catsData);
+    document.getElementById('modal-cats').innerHTML = listaCats.map(cat => {
+      const info = CATEGORIAS[cat] || { color: '#888', nombre: cat };
+      return `<span class="modal-cat-chip" style="background:${info.color}">${info.nombre}</span>`;
+    }).join('');
+    document.getElementById('modal').classList.add('activo');
+  } catch(e) { console.error(e); }
+}
+
+async function toggleTraduccion() {
+  const btn = document.getElementById('modal-traducir');
+  const caja = document.getElementById('modal-texto');
+  if (_mostrandoTraduccion) {
+    caja.textContent = _relatoOriginal;
+    btn.textContent = 'ver en español';
+    _mostrandoTraduccion = false;
+    return;
+  }
+  if (_relatoTraducido) {
+    caja.textContent = _relatoTraducido;
+    btn.textContent = 'ver original';
+    _mostrandoTraduccion = true;
+    return;
+  }
+  btn.textContent = 'traduciendo...';
+  try {
+    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(_relatoOriginal)}&langpair=en|es`;
+    const res = await fetch(url);
+    const json = await res.json();
+    _relatoTraducido = json.responseData.translatedText;
+    caja.textContent = _relatoTraducido;
+    btn.textContent = 'ver original';
+    _mostrandoTraduccion = true;
+  } catch {
+    btn.textContent = 'ver en español';
+  }
+}
+
+function cerrarModal() {
+  document.getElementById('modal').classList.remove('activo');
+  _relatoTraducido = null;
+  _mostrandoTraduccion = false;
+}
+document.getElementById('modal').addEventListener('click', (e) => {
+  if (e.target.id === 'modal') cerrarModal();
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') cerrarModal(); });
+
+// ============================================================
+// LEYENDA
+// ============================================================
+function clickCategoria(cat, soloEsta) {
+  if (soloEsta) {
+    const yaEsSolo = filtrosActivos[cat] &&
+      Object.entries(filtrosActivos).every(([k, v]) => k === cat ? v : !v);
+    if (yaEsSolo) {
+      for (const k of Object.keys(filtrosActivos)) filtrosActivos[k] = true;
+    } else {
+      for (const k of Object.keys(filtrosActivos)) filtrosActivos[k] = (k === cat);
+    }
+  } else {
+    filtrosActivos[cat] = !filtrosActivos[cat];
+  }
+  for (const p of pintitas) {
+    p.opacidadFiltroObjetivo = filtrosActivos[p.categoria] ? 1 : 0;
+  }
+  actualizarLeyenda();
+}
+
+function actualizarLeyenda() {
+  const cont = document.getElementById('leyenda');
+  cont.innerHTML = Object.entries(CATEGORIAS).map(([k, v]) => {
+    const cls = filtrosActivos[k] ? '' : ' apagado';
+    return `<div class="leyenda-item${cls}" data-cat="${k}" role="button" tabindex="0" title="Click: ocultar · Shift+click: aislar">
+      <span class="leyenda-dot" style="background:${v.color}"></span>${v.nombre}
+    </div>`;
+  }).join('');
+  cont.querySelectorAll('.leyenda-item').forEach(el => {
+    el.addEventListener('click', (e) => clickCategoria(el.dataset.cat, e.shiftKey));
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault(); clickCategoria(el.dataset.cat, e.shiftKey);
+      }
+    });
+  });
+}
+actualizarLeyenda();
+
+const leyendaToggle = document.getElementById('leyenda-toggle');
+if (leyendaToggle) {
+  leyendaToggle.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const abierta = document.body.classList.toggle('leyenda-abierta');
+    leyendaToggle.setAttribute('aria-expanded', abierta ? 'true' : 'false');
+    leyendaToggle.setAttribute('aria-label', abierta ? 'ocultar categorías' : 'mostrar categorías');
+  });
+  leyendaToggle.addEventListener('touchstart', (e) => {
+    e.stopPropagation();
+  }, { passive: true });
+}
+
+const audioToggle = document.getElementById('audio-toggle');
+if (audioToggle) {
+  audioToggle.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    alternarAudio();
+  });
+  audioToggle.addEventListener('touchstart', (e) => {
+    e.stopPropagation();
+  }, { passive: true });
+}
+
+// ============================================================
+// COLUMNA DE CONCEPTOS (Codex)
+// Flujo continuo de términos semánticos con tokens numerados.
+// Los ingresos nuevos encolan sus categorías y lanzan una ráfaga
+// con énfasis, sincronizada con la aparición de la pintita.
+// ============================================================
+const conceptosFlujo = document.getElementById('conceptos-flujo');
+const conceptosPendientes = [];
+let conceptosTimer = null;
+let conceptoSecuencia = 0;
+
+function elegirAleatorio(lista) {
+  return lista[Math.floor(Math.random() * lista.length)];
+}
+
+function encolarConcepto(cat) {
+  if (!CONCEPTOS_POR_CATEGORIA[cat]) return;
+  conceptosPendientes.push(cat);
+  if (conceptosPendientes.length > 120) conceptosPendientes.shift();
+}
+
+function categoriaParaConcepto() {
+  if (conceptosPendientes.length && Math.random() < 0.72) {
+    const i = Math.floor(Math.random() * conceptosPendientes.length);
+    return conceptosPendientes.splice(i, 1)[0];
+  }
+  if (pintitas.length) {
+    return elegirAleatorio(pintitas).categoria;
+  }
+  return elegirAleatorio(Object.keys(CATEGORIAS));
+}
+
+function emitirConcepto(cat, enfasis = false) {
+  if (!conceptosFlujo || !CONCEPTOS_POR_CATEGORIA[cat]) return;
+  conceptoSecuencia = (conceptoSecuencia + 1) % 10000;
+  const codigo = String(conceptoSecuencia).padStart(4, '0');
+  const palabra = elegirAleatorio(CONCEPTOS_POR_CATEGORIA[cat]);
+  const token = document.createElement('span');
+  token.className = 'concepto-token';
+  token.textContent = `${codigo} > ${palabra}`;
+  token.style.color = CATEGORIAS[cat]?.color || '#cccccc';
+  token.style.setProperty('--alpha', enfasis ? '0.96' : (0.74 + Math.random() * 0.22).toFixed(2));
+  token.style.setProperty('--vida', `${enfasis ? 7600 + Math.random() * 2200 : 9000 + Math.random() * 3300}ms`);
+  conceptosFlujo.insertBefore(token, conceptosFlujo.firstChild);
+
+  while (conceptosFlujo.children.length > 138) {
+    conceptosFlujo.lastElementChild?.remove();
+  }
+  setTimeout(() => token.remove(), 12800);
+}
+
+function intervaloConceptos() {
+  const densidad = Math.min(1, (Math.max(0, totalRelatos - 64) / 220) + (pintitas.length / 720));
+  const base = 330 - densidad * 220;
+  return Math.max(72, base) * (0.68 + Math.random() * 0.56);
+}
+
+function cicloConceptos() {
+  emitirConcepto(categoriaParaConcepto());
+  conceptosTimer = setTimeout(cicloConceptos, intervaloConceptos());
+}
+
+function iniciarFlujoConceptos() {
+  if (conceptosTimer || !conceptosFlujo) return;
+  for (let i = 0; i < 46; i++) {
+    setTimeout(() => emitirConcepto(categoriaParaConcepto(), i < 16), i * 30);
+  }
+  conceptosTimer = setTimeout(cicloConceptos, 650);
+}
+
+function registrarConceptos(lista, enfasis = false) {
+  if (!lista?.length) return;
+  for (const p of lista) encolarConcepto(p.categoria);
+  if (!enfasis) return;
+  const rafaga = Math.min(28, Math.max(8, Math.ceil(lista.length * 1.8)));
+  for (let i = 0; i < rafaga; i++) {
+    setTimeout(() => emitirConcepto(categoriaParaConcepto(), true), 28 * i + Math.random() * 70);
+  }
+}
+
+// ============================================================
+// CONEXIÓN AL SERVIDOR
+// ============================================================
+let ultimaPintitaId = 0;
+
+async function inicializar() {
+  try {
+    const res = await fetch(`${API_BASE}/pintitas_recientes?n=4000`);
+    const data = await res.json();
+    totalRelatos = data.length > 0 ? Math.max(64, Math.round(data.length / 3.5)) : 64;
+    data.reverse();
+    for (const p of data) {
+      if (!pintitasMap.has(p.id)) {
+        pintitas.push(new Pintita(p.id, p.respuesta_id, p.categoria, false));
+        pintitasMap.set(p.id, true);
+        if (p.id > ultimaPintitaId) ultimaPintitaId = p.id;
+      }
+    }
+    registrarConceptos(data.slice(-60), false);
+    iniciarFlujoConceptos();
+    actualizarEstado();
+    setTimeout(ajustarCamaraInicial, 100);
+  } catch(e) {
+    console.error(e);
+    marcarSinConexion();
+  }
+}
+
+async function consultarNuevas() {
+  try {
+    const res = await fetch(`${API_BASE}/pintitas_recientes?n=100`);
+    const data = await res.json();
+    const nuevas = data.filter(p => p.id > ultimaPintitaId);
+    nuevas.reverse();
+    // Agrupar por relato: un relato genera varias pintitas (una por
+    // categoría activada). El sub-pulso grave suena una vez por relato;
+    // cada pintita entra escalonada con su propio armónico de la serie
+    // (231 x n), su destello supernova y su ráfaga de conceptos.
+    const porRespuesta = new Map();
+    for (const p of nuevas) {
+      if (!pintitasMap.has(p.id)) {
+        if (!porRespuesta.has(p.respuesta_id)) porRespuesta.set(p.respuesta_id, []);
+        porRespuesta.get(p.respuesta_id).push(p);
+      }
+    }
+    for (const [respId, grupo] of porRespuesta) {
+      const delayBase = Math.random() * 1200;
+      // Golpe físico grave: anuncia la llegada del relato
+      setTimeout(() => subPulsoIngreso(), delayBase);
+      grupo.forEach((p, i) => {
+        // Serie armónica de Dayvid: cada pintita toma el siguiente
+        // armónico (231 x n), ciclando del 1 al 16
+        const armN = 1 + (contadorIngresos % ARMONICOS_SERIE);
+        contadorIngresos++;
+        const delay = delayBase + 400 + i * 350;
+        setTimeout(() => {
+          const nueva = new Pintita(p.id, p.respuesta_id, p.categoria, true);
+          pintitas.push(nueva);
+          pintitasMap.set(p.id, true);
+          swellIngreso(armN);
+          dispararFlash(nueva);
+          registrarConceptos([p], true);
+        }, delay);
+        if (p.id > ultimaPintitaId) ultimaPintitaId = p.id;
+      });
+    }
+    actualizarEstado();
+  } catch(e) { marcarSinConexion(); }
+}
+
+async function actualizarEstado() {
+  try {
+    const res = await fetch(`${API_BASE}/estado`);
+    const data = await res.json();
+    totalRelatos = data.total_respuestas || totalRelatos;
+    if (data.pintitas?.length) actualizarCategoriaAudio(data.pintitas[0].categoria);
+    document.getElementById('n-respuestas').textContent = data.total_respuestas;
+    document.getElementById('estado-dot').classList.add('vivo');
+    document.getElementById('estado-texto').textContent = 'corpus activo';
+  } catch(e) { marcarSinConexion(); }
+}
+
+function marcarSinConexion() {
+  document.getElementById('estado-dot').classList.remove('vivo');
+  document.getElementById('estado-texto').textContent = 'sin conexión';
+}
+
+iniciarFlujoConceptos();
+inicializar();
+setInterval(consultarNuevas, POLL_INTERVAL);
+
+// ============================================================
+// MOVIMIENTO DEL CELULAR
+// ============================================================
+let motionActivo = false;
+let motionSolicitado = false;
+let ultimoShake = 0;
+
+function desordenarPorShake(intensidad) {
+  const centroX = hoverWorldX ?? 0;
+  const centroY = hoverWorldY ?? 0;
+  const radio = getWorldRadius() * 1.2;
+  for (const p of pintitas) {
+    const dx = p.x - centroX;
+    const dy = p.y - centroY;
+    const d = Math.sqrt(dx * dx + dy * dy) || 1;
+    const cerca = Math.max(0.18, 1 - d / radio);
+    const a = Math.random() * Math.PI * 2;
+    const m = intensidad * cerca * (0.55 + Math.random() * 0.85);
+    p.vx += Math.cos(a) * m;
+    p.vy += Math.sin(a) * m;
+    p.tiempoAgitacion = DURACION_AGITACION;
+  }
+}
+
+function activarMovimientoCelular() {
+  if (motionActivo || typeof DeviceMotionEvent === 'undefined') return;
+  motionActivo = true;
+  window.addEventListener('devicemotion', (e) => {
+    const acc = e.accelerationIncludingGravity || e.acceleration;
+    if (!acc) return;
+    const ax = acc.x || 0;
+    const ay = acc.y || 0;
+    const az = acc.z || 0;
+    const mag = Math.sqrt(ax * ax + ay * ay + az * az);
+    const ahora = performance.now();
+    if (mag > 16.2 && ahora - ultimoShake > 260) {
+      ultimoShake = ahora;
+      desordenarPorShake(Math.min(2.2, (mag - 13.5) * 0.095));
+    }
+  }, { passive: true });
+}
+
+async function prepararMovimientoCelular() {
+  if (motionActivo || motionSolicitado || typeof DeviceMotionEvent === 'undefined') return;
+  motionSolicitado = true;
+  try {
+    if (typeof DeviceMotionEvent.requestPermission === 'function') {
+      const permiso = await DeviceMotionEvent.requestPermission();
+      if (permiso === 'granted') activarMovimientoCelular();
+    } else {
+      activarMovimientoCelular();
+    }
+  } catch(e) {
+    // Algunos navegadores bloquean sensores en HTTP; la interacción táctil sigue activa.
+  }
+}
+
+// ============================================================
+// MODO PROYECCIÓN : cliente WebSocket de gestos corporales
+// Activar con: display.html?modo=proyeccion
+// Requiere gesto_servidor.py corriendo en ws://localhost:8765
+// Combinable con audio: display.html?modo=proyeccion&audio=on
+// ============================================================
+const MODO_PROYECCION = new URLSearchParams(window.location.search).get('modo') === 'proyeccion';
+
+if (MODO_PROYECCION) {
+  document.body.style.cursor = 'none';
+  window.abrirRelato = async () => {};
+
+  // Bloquear interacción directa: en proyección manda el cuerpo
+  ['mousedown','mousemove','mouseup','mouseleave',
+   'touchstart','touchmove','touchend',
+   'pointerdown','pointermove','pointerup','pointercancel'].forEach(tipo =>
+    window.addEventListener(tipo, e => e.stopPropagation(), true)
+  );
+
+  // Indicador de estado (esquina inferior derecha)
+  const indicador = document.createElement('div');
+  indicador.style.cssText = `
+    position: fixed; bottom: 1.8rem; right: 1.8rem; z-index: 99;
+    display: flex; align-items: center; gap: 7px;
+    font-family: 'Space Mono', monospace; font-size: 9px;
+    letter-spacing: 0.12em; color: #444; pointer-events: none;
+  `;
+  indicador.innerHTML = `
+    <span id="gs-dot" style="width:5px;height:5px;border-radius:50%;
+      background:#1a1a1a;display:inline-block;transition:background 0.3s"></span>
+    <span id="gs-txt">gestos</span>`;
+  document.body.appendChild(indicador);
+
+  function setEstado(color, texto) {
+    const d = document.getElementById('gs-dot');
+    const t = document.getElementById('gs-txt');
+    if (d) { d.style.background = color; d.style.boxShadow = color !== '#1a1a1a' ? `0 0 7px ${color}99` : 'none'; }
+    if (t) t.textContent = texto;
+  }
+
+  // Parámetros de mapeo (ajustables sin tocar la lógica de partículas)
+  const MAPA = {
+    dispersionBase:     0.55,
+    velocidadAmp:       2.2,
+    inclinacionOffset:  0.14,
+    alturaOffset:       0.28,
+    radioDistancia:     1.8,
+  };
+
+  // Último estado recibido (suavizado para evitar saltos)
+  let g = { activo: false, cx: 0.5, cy: 0.5, distancia: 0.5,
+            apertura: 0, altura_brazos: 0.3, velocidad: 0, inclinacion: 0 };
+  let gPrev = { ...g };
+  const LERP = 0.28;
+
+  function lerpVal(a, b, t) { return a + (b - a) * t; }
+
+  function aplicarGesto(raw) {
+    if (!raw.activo) {
+      if (gesto.activo) {
+        gesto.dispersion *= 0.85;
+        gesto.jitter     *= 0.85;
+        if (gesto.dispersion < 0.01) soltarGesto();
+      }
+      setEstado('#C4943D', 'sin cuerpo');
+      return;
+    }
+
+    setEstado('#1D9E75', 'cuerpo activo');
+
+    g.cx            = lerpVal(gPrev.cx,            raw.cx,            LERP);
+    g.cy            = lerpVal(gPrev.cy,            raw.cy,            LERP);
+    g.distancia     = lerpVal(gPrev.distancia,     raw.distancia,     LERP);
+    g.apertura      = lerpVal(gPrev.apertura,      raw.apertura,      LERP);
+    g.altura_brazos = lerpVal(gPrev.altura_brazos, raw.altura_brazos, LERP);
+    g.velocidad     = lerpVal(gPrev.velocidad,     raw.velocidad,     LERP * 0.6);
+    g.inclinacion   = lerpVal(gPrev.inclinacion,   raw.inclinacion,   LERP);
+    gPrev = { ...g };
+
+    const sx = (g.cx + g.inclinacion * MAPA.inclinacionOffset) * W;
+    const sy = (g.cy - (g.altura_brazos - 0.3) * MAPA.alturaOffset) * H;
+
+    const usarTactil = g.distancia > 0.35;
+    actualizarGesto(sx, sy, true, false, usarTactil);
+
+    gesto.dispersion = Math.min(1, gesto.dispersion + g.apertura * MAPA.dispersionBase);
+
+    mouseVel = Math.min(4, mouseVel + g.velocidad * MAPA.velocidadAmp);
+    ultimoMouseTime = performance.now();
+
+    hoverWorldX = gesto.x;
+    hoverWorldY = gesto.y;
+  }
+
+  function conectarWS() {
+    setEstado('#C4943D', 'conectando');
+    const ws = new WebSocket('ws://localhost:8765');
+
+    ws.onopen = () => {
+      setEstado('#C4943D', 'sin cuerpo');
+      console.log('[proyección] WebSocket conectado');
+    };
+
+    ws.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        aplicarGesto(data);
+      } catch (err) {
+        console.warn('[proyección] mensaje inválido:', err);
+      }
+    };
+
+    ws.onclose = () => {
+      setEstado('#8B0000', 'sin servidor');
+      console.warn('[proyección] WebSocket cerrado : reintentando en 3s');
+      soltarGesto();
+      setTimeout(conectarWS, 3000);
+    };
+
+    ws.onerror = (err) => {
+      console.error('[proyección] WebSocket error:', err);
+      ws.close();
+    };
+  }
+
+  conectarWS();
+}
+</script>
+</body>
+</html>
