@@ -156,53 +156,6 @@
     50% { transform: scale(1.045); opacity: 1; }
   }
 
-  /* COLUMNA DE CONCEPTOS (flujo continuo, costado derecho)
-     Terminos semanticos del corpus con estetica terminal:
-     tokens numerados, colores por categoria, mascara de gradiente. */
-  .conceptos-flujo {
-    position: fixed; top: 4.9rem; right: 1.35rem; bottom: 4.9rem;
-    width: 330px;
-    max-width: calc(100vw - 2.7rem);
-    display: flex; flex-direction: column; align-items: flex-start; gap: 0.02rem;
-    overflow: hidden; pointer-events: none; z-index: 3;
-    mix-blend-mode: normal;
-    padding-left: 0.65rem;
-    border-left: 0.5px solid rgba(220,210,198,0.13);
-    mask-image: linear-gradient(to bottom, transparent 0%, #000 5%, #000 93%, transparent 100%);
-    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 5%, #000 93%, transparent 100%);
-  }
-  .concepto-token {
-    display: block;
-    max-width: 100%;
-    font-size: 9.5px; line-height: 1.06; letter-spacing: 0.07em;
-    text-transform: lowercase; white-space: nowrap;
-    overflow: hidden;
-    font-variant-numeric: tabular-nums;
-    opacity: 0; filter: none;
-    text-shadow: 0 0 3px currentColor;
-    transform: translateX(0) translateY(-4px);
-    animation: concepto-aparece var(--vida, 9400ms) linear forwards;
-  }
-  @keyframes concepto-aparece {
-    0% {
-      opacity: 0;
-      filter: none;
-      transform: translateY(-4px);
-    }
-    7% {
-      opacity: var(--alpha, 0.72);
-      filter: none;
-    }
-    72% {
-      opacity: var(--alpha, 0.72);
-    }
-    100% {
-      opacity: 0;
-      filter: none;
-      transform: translateY(18px);
-    }
-  }
-
   .leyenda {
     position: absolute; left: 1.8rem; bottom: 5.35rem;
     display: flex; flex-wrap: wrap; gap: 8px 14px;
@@ -287,15 +240,6 @@
     .leyenda-item { font-size: 7.2px; gap: 4px; padding: 2px 0; line-height: 1.15; color: rgba(220,210,198,0.62); }
     .leyenda-dot { width: 7px; height: 7px; }
     .estado-texto { color: rgba(220,210,198,0.54); }
-    .conceptos-flujo {
-      top: 5.0rem; right: 0.7rem; bottom: 5.0rem;
-      width: 198px; max-width: 52vw; gap: 0;
-      padding-left: 0.45rem;
-    }
-    .concepto-token {
-      font-size: 7.2px; line-height: 1.02; letter-spacing: 0.04em;
-      text-shadow: 0 0 2px currentColor;
-    }
     .zoom-hint { display: none; }
     .modal-contenido { padding: 1.4rem; font-size: 12.5px; }
   }
@@ -335,8 +279,6 @@
     </div>
   </div>
 </div>
-
-<div class="conceptos-flujo" id="conceptos-flujo" aria-hidden="true"></div>
 
 <div class="zoom-hint">agita el cursor para revelar relatos · pellizca / rueda para zoom · arrastra para mover</div>
 
@@ -380,56 +322,8 @@ const CATEGORIAS = {
   'violencia_sexual':      { color: '#B814E8', nombre: 'Violencia sexual' },
   'placer_deseo':          { color: '#FF2D8A', nombre: 'Placer / deseo' },
   'profesional_hombre':    { color: '#4A7BAF', nombre: 'Profesional hombre' },
-  'profesional_mujer':     { color: '#F5DD2C', nombre: 'Profesional mujer' }
-};
-
-// Vocabulario de la columna de conceptos, derivado de los campos
-// semánticos del clasificador del servidor (11 categorías producción)
-const CONCEPTOS_POR_CATEGORIA = {
-  'dolor_fisico': [
-    'dolor', 'ardor', 'punzada', 'pinchazo', 'presion', 'calambre',
-    'desgarro', 'sangre', 'herida', 'contraccion', 'umbral', 'cuerpo'
-  ],
-  'miedo': [
-    'miedo', 'panico', 'nervios', 'temblor', 'angustia', 'terror',
-    'taquicardia', 'alerta', 'anticipacion', 'llanto'
-  ],
-  'verguenza_exposicion': [
-    'verguenza', 'pudor', 'expuesta', 'desnudez', 'vulnerable',
-    'observada', 'examinada', 'intimidad', 'cosificada', 'mirada'
-  ],
-  'sensaciones_frias': [
-    'frio', 'helado', 'metal', 'acero', 'gelido', 'rigido',
-    'instrumento', 'clinico', 'escalofrio', 'distancia'
-  ],
-  'sensaciones_calidas': [
-    'tibio', 'calido', 'suave', 'silicona', 'contacto',
-    'contencion', 'abrigo', 'refugio', 'amable'
-  ],
-  'sonido': [
-    'sonido', 'ruido', 'click', 'metalico', 'eco', 'silencio',
-    'crujido', 'zumbido', 'voz', 'acustica'
-  ],
-  'aromas': [
-    'olor', 'aroma', 'alcohol', 'desinfectante', 'latex',
-    'esteril', 'quimico', 'perfume', 'ambiente'
-  ],
-  'violencia_sexual': [
-    'consentimiento', 'limite', 'violencia', 'abuso', 'invasion',
-    'trauma', 'memoria', 'cuerpo'
-  ],
-  'placer_deseo': [
-    'placer', 'deseo', 'goce', 'sensualidad', 'autonomia',
-    'exploracion', 'curiosidad', 'piel'
-  ],
-  'profesional_hombre': [
-    'medico', 'doctor', 'ginecologo', 'autoridad', 'presencia',
-    'voz masculina', 'distancia'
-  ],
-  'profesional_mujer': [
-    'medica', 'matrona', 'ginecologa', 'doctora', 'acompanamiento',
-    'voz', 'confianza', 'cuidado'
-  ]
+  'profesional_mujer':     { color: '#F5DD2C', nombre: 'Profesional mujer' },
+  'artefactos_procedimientos': { color: '#7C8A99', nombre: 'Artefactos / procedimientos' }
 };
 
 // Perfil tímbrico por categoría: modula el carácter del bordón
@@ -447,7 +341,8 @@ const AUDIO_POR_CATEGORIA = {
   'violencia_sexual':     { filtro: 1500, pulso: 520, q: 3.4, metal: 0.58 },
   'placer_deseo':         { filtro: 820,  pulso: 260, q: 1.2, metal: 0.14 },
   'profesional_hombre':   { filtro: 980,  pulso: 310, q: 2.1, metal: 0.34 },
-  'profesional_mujer':    { filtro: 860,  pulso: 260, q: 1.4, metal: 0.18 }
+  'profesional_mujer':    { filtro: 860,  pulso: 260, q: 1.4, metal: 0.18 },
+  'artefactos_procedimientos': { filtro: 1100, pulso: 340, q: 2.4, metal: 0.50 }
 };
 
 const filtrosActivos = {};
@@ -487,6 +382,13 @@ function ajustarCanvas() {
   const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
   W = window.innerWidth;
   H = window.innerHeight;
+  // Guardia: en previsualizaciones o iframes la ventana puede no tener
+  // dimensiones todavía. Un canvas de ancho 0 rompe drawImage en el loop
+  // de render, así que se reintenta hasta que exista layout real.
+  if (W < 2 || H < 2) {
+    setTimeout(ajustarCanvas, 150);
+    return;
+  }
   canvas.width = W * dpr;
   canvas.height = H * dpr;
   canvas.style.width = W + 'px';
@@ -759,21 +661,53 @@ class Pintita {
 
     this.brushAngle = Math.random() * Math.PI * 2;
     this.brushAngleVel = (Math.random() - 0.5) * 0.00040;
-    const elongation = 0.9 + Math.random() * 1.9;
     this.particles = [];
-    const nP = 6 + Math.floor(Math.random() * 5);
-    for (let i = 0; i < nP; i++) {
-      const t = nP > 1 ? (i / (nP - 1) - 0.5) * 1.6 : 0;
-      const radial = Math.pow(Math.random(), 0.72) * 0.85;
-      const a = Math.random() * Math.PI * 2;
+
+    if (cat === 'artefactos_procedimientos') {
+      // VARIANTE RADIAL: la categoría de objetos y procedimientos es de
+      // otro orden lógico (nombra lo material, no un estado del cuerpo)
+      // y se distingue por la forma: núcleo central + satélites en
+      // anillo, silueta circular y contenida en vez de la pincelada
+      // alargada. Misma textura, mismo tamaño, misma opacidad: se
+      // diferencia sin jerarquizarse por sobre las categorías afectivas.
       this.particles.push({
-        along: t * elongation + Math.cos(a) * radial * 0.72,
-        perp: (Math.random() - 0.5) * 0.60 + Math.sin(a) * radial,
-        size: 0.40 + Math.random() * 0.62,
-        aspect: 0.68 + Math.random() * 1.34,
+        along: 0, perp: 0,
+        size: 0.52 + Math.random() * 0.18,
+        aspect: 0.94 + Math.random() * 0.12,
         rot: Math.random() * Math.PI * 2,
-        alpha: 0.78 + Math.random() * 0.42,
+        alpha: 0.92 + Math.random() * 0.28,
       });
+      const nSat = 6 + Math.floor(Math.random() * 3);
+      const faseAnillo = Math.random() * Math.PI * 2;
+      for (let i = 0; i < nSat; i++) {
+        const ang = faseAnillo + (i / nSat) * Math.PI * 2 + (Math.random() - 0.5) * 0.45;
+        const r = 0.62 + Math.random() * 0.30;
+        this.particles.push({
+          along: Math.cos(ang) * r,
+          perp: Math.sin(ang) * r,
+          size: 0.34 + Math.random() * 0.26,
+          aspect: 0.90 + Math.random() * 0.20,
+          rot: Math.random() * Math.PI * 2,
+          alpha: 0.72 + Math.random() * 0.40,
+        });
+      }
+    } else {
+      // Pincelada alargada: forma compartida por las categorías afectivas
+      const elongation = 0.9 + Math.random() * 1.9;
+      const nP = 6 + Math.floor(Math.random() * 5);
+      for (let i = 0; i < nP; i++) {
+        const t = nP > 1 ? (i / (nP - 1) - 0.5) * 1.6 : 0;
+        const radial = Math.pow(Math.random(), 0.72) * 0.85;
+        const a = Math.random() * Math.PI * 2;
+        this.particles.push({
+          along: t * elongation + Math.cos(a) * radial * 0.72,
+          perp: (Math.random() - 0.5) * 0.60 + Math.sin(a) * radial,
+          size: 0.40 + Math.random() * 0.62,
+          aspect: 0.68 + Math.random() * 1.34,
+          rot: Math.random() * Math.PI * 2,
+          alpha: 0.78 + Math.random() * 0.42,
+        });
+      }
     }
 
     const maxR = getWorldRadius();
@@ -1138,14 +1072,16 @@ const FREQ_SUB = FREQ_BASE / 4;      // 57.75 Hz
 const ARMONICOS_SERIE = 16;          // la serie de ingresos cicla del 1 al 16
 const DRONE_PARCIALES = [
   // [multiplo de 231, ganancia base]
-  [0.25, 0.26],   // 57.75 Hz : sub
-  [0.5,  0.15],   // 115.5 Hz
-  [1,    0.115],  // 231 Hz : fundamental
-  [2,    0.072],  // 462
-  [3,    0.048],  // 693
-  [4,    0.034],  // 924
-  [5,    0.023],  // 1155
-  [6,    0.015],  // 1386
+  // Ganancias bajas y decrecientes: el bordón es un fondo que se
+  // percibe más como atmósfera que como nota sostenida
+  [0.25, 0.13],   // 57.75 Hz : sub
+  [0.5,  0.080],  // 115.5 Hz
+  [1,    0.058],  // 231 Hz : fundamental
+  [2,    0.040],  // 462
+  [3,    0.028],  // 693
+  [4,    0.020],  // 924
+  [5,    0.013],  // 1155
+  [6,    0.008],  // 1386
 ];
 let contadorIngresos = 0;
 
@@ -1196,12 +1132,16 @@ function crearAudioSiHaceFalta() {
   filtro.Q.value = 1.1;
 
   const droneGain = ctxAudio.createGain();
-  droneGain.gain.value = 0.42;
+  droneGain.gain.value = 0.20;
   filtro.connect(droneGain);
   droneGain.connect(master);
 
-  // Voces del bordón: serie armónica de 231, cada una con su LFO
-  // de amplitud aleatorio e independiente (fluctuación orgánica)
+  // Voces del bordón: serie armónica de 231. Dos movimientos por voz:
+  // 1) LFO de amplitud profundo y lento (ciclos de 8 a 45 s), con
+  //    profundidad 55-85% de la ganancia base: cada parcial emerge y
+  //    casi desaparece en olas descorrelacionadas, nunca una nota fija.
+  // 2) Drift de afinación: un LFO muy lento mueve el detune unos pocos
+  //    cents, como una cuerda que respira. Micro-desafinación viva.
   const voces = DRONE_PARCIALES.map(([mult, gBase], i) => {
     const osc = ctxAudio.createOscillator();
     osc.type = 'sine';
@@ -1209,20 +1149,29 @@ function crearAudioSiHaceFalta() {
     osc.detune.value = (Math.random() - 0.5) * 10;   // leve grosor
 
     const g = ctxAudio.createGain();
-    g.gain.value = gBase;
+    g.gain.value = gBase * 0.5;
 
     const lfo = ctxAudio.createOscillator();
     lfo.type = 'sine';
-    lfo.frequency.value = 0.04 + Math.random() * 0.12;   // ciclo de 8 a 25 s
+    lfo.frequency.value = 0.022 + Math.random() * 0.10;   // ciclo de 8 a 45 s
     const lfoDepth = ctxAudio.createGain();
-    lfoDepth.gain.value = gBase * (0.30 + Math.random() * 0.25);
+    lfoDepth.gain.value = gBase * (0.55 + Math.random() * 0.30);
     lfo.connect(lfoDepth);
     lfoDepth.connect(g.gain);
+
+    const drift = ctxAudio.createOscillator();
+    drift.type = 'sine';
+    drift.frequency.value = 0.013 + Math.random() * 0.035;   // ciclo de 20 a 75 s
+    const driftDepth = ctxAudio.createGain();
+    driftDepth.gain.value = 3 + Math.random() * 5;   // +-3 a +-8 cents
+    drift.connect(driftDepth);
+    driftDepth.connect(osc.detune);
 
     osc.connect(g);
     g.connect(filtro);
     osc.start();
     lfo.start();
+    drift.start();
     return { mult, osc, g, gBase };
   });
 
@@ -1277,7 +1226,7 @@ function aplicarPerfilAudio(cat) {
   audioSistema.filtro.frequency.setTargetAtTime(perfil.filtro, ahora, 1.8);
   audioSistema.filtro.Q.setTargetAtTime(perfil.q, ahora, 1.4);
   audioSistema.lfoFiltroGain.gain.setTargetAtTime(150 + perfil.metal * 320, ahora, 1.8);
-  audioSistema.droneGain.gain.setTargetAtTime(0.42 + perfil.metal * 0.10, ahora, 1.2);
+  audioSistema.droneGain.gain.setTargetAtTime(0.20 + perfil.metal * 0.05, ahora, 1.2);
 }
 
 function actualizarCategoriaAudio(cat) {
@@ -1373,10 +1322,11 @@ function swellIngreso(armN) {
   const voz = audioSistema.voces.find(v => Math.abs(v.mult - armN) < 0.01);
   if (voz) {
     const tv = ctxAudio.currentTime;
+    const reposo = voz.gBase * 0.5;   // centro actual de la voz en el bordón
     voz.g.gain.cancelScheduledValues(tv);
-    voz.g.gain.setValueAtTime(Math.max(voz.g.gain.value, voz.gBase), tv);
-    voz.g.gain.linearRampToValueAtTime(voz.gBase * 2.2, tv + 0.4);
-    voz.g.gain.linearRampToValueAtTime(voz.gBase, tv + 6.0);
+    voz.g.gain.setValueAtTime(Math.max(voz.g.gain.value, reposo), tv);
+    voz.g.gain.linearRampToValueAtTime(voz.gBase * 1.6, tv + 0.4);
+    voz.g.gain.linearRampToValueAtTime(reposo, tv + 6.0);
   }
 }
 
@@ -1548,6 +1498,13 @@ function render() {
   const dt = Math.min(50, ahora - ultimoTiempo);
   ultimoTiempo = ahora;
   tiempoGlobal += dt;
+
+  // Guardia: si los canvases aún no tienen tamaño (ver ajustarCanvas),
+  // saltar el frame sin dibujar
+  if (W < 2 || H < 2 || canvas.width === 0) {
+    requestAnimationFrame(render);
+    return;
+  }
 
   const lerp = 0.12;
   cam.x += (cam.tx - cam.x) * lerp;
@@ -2073,86 +2030,6 @@ if (audioToggle) {
 }
 
 // ============================================================
-// COLUMNA DE CONCEPTOS (Codex)
-// Flujo continuo de términos semánticos con tokens numerados.
-// Los ingresos nuevos encolan sus categorías y lanzan una ráfaga
-// con énfasis, sincronizada con la aparición de la pintita.
-// ============================================================
-const conceptosFlujo = document.getElementById('conceptos-flujo');
-const conceptosPendientes = [];
-let conceptosTimer = null;
-let conceptoSecuencia = 0;
-
-function elegirAleatorio(lista) {
-  return lista[Math.floor(Math.random() * lista.length)];
-}
-
-function encolarConcepto(cat) {
-  if (!CONCEPTOS_POR_CATEGORIA[cat]) return;
-  conceptosPendientes.push(cat);
-  if (conceptosPendientes.length > 120) conceptosPendientes.shift();
-}
-
-function categoriaParaConcepto() {
-  if (conceptosPendientes.length && Math.random() < 0.72) {
-    const i = Math.floor(Math.random() * conceptosPendientes.length);
-    return conceptosPendientes.splice(i, 1)[0];
-  }
-  if (pintitas.length) {
-    return elegirAleatorio(pintitas).categoria;
-  }
-  return elegirAleatorio(Object.keys(CATEGORIAS));
-}
-
-function emitirConcepto(cat, enfasis = false) {
-  if (!conceptosFlujo || !CONCEPTOS_POR_CATEGORIA[cat]) return;
-  conceptoSecuencia = (conceptoSecuencia + 1) % 10000;
-  const codigo = String(conceptoSecuencia).padStart(4, '0');
-  const palabra = elegirAleatorio(CONCEPTOS_POR_CATEGORIA[cat]);
-  const token = document.createElement('span');
-  token.className = 'concepto-token';
-  token.textContent = `${codigo} > ${palabra}`;
-  token.style.color = CATEGORIAS[cat]?.color || '#cccccc';
-  token.style.setProperty('--alpha', enfasis ? '0.96' : (0.74 + Math.random() * 0.22).toFixed(2));
-  token.style.setProperty('--vida', `${enfasis ? 7600 + Math.random() * 2200 : 9000 + Math.random() * 3300}ms`);
-  conceptosFlujo.insertBefore(token, conceptosFlujo.firstChild);
-
-  while (conceptosFlujo.children.length > 138) {
-    conceptosFlujo.lastElementChild?.remove();
-  }
-  setTimeout(() => token.remove(), 12800);
-}
-
-function intervaloConceptos() {
-  const densidad = Math.min(1, (Math.max(0, totalRelatos - 64) / 220) + (pintitas.length / 720));
-  const base = 330 - densidad * 220;
-  return Math.max(72, base) * (0.68 + Math.random() * 0.56);
-}
-
-function cicloConceptos() {
-  emitirConcepto(categoriaParaConcepto());
-  conceptosTimer = setTimeout(cicloConceptos, intervaloConceptos());
-}
-
-function iniciarFlujoConceptos() {
-  if (conceptosTimer || !conceptosFlujo) return;
-  for (let i = 0; i < 46; i++) {
-    setTimeout(() => emitirConcepto(categoriaParaConcepto(), i < 16), i * 30);
-  }
-  conceptosTimer = setTimeout(cicloConceptos, 650);
-}
-
-function registrarConceptos(lista, enfasis = false) {
-  if (!lista?.length) return;
-  for (const p of lista) encolarConcepto(p.categoria);
-  if (!enfasis) return;
-  const rafaga = Math.min(28, Math.max(8, Math.ceil(lista.length * 1.8)));
-  for (let i = 0; i < rafaga; i++) {
-    setTimeout(() => emitirConcepto(categoriaParaConcepto(), true), 28 * i + Math.random() * 70);
-  }
-}
-
-// ============================================================
 // CONEXIÓN AL SERVIDOR
 // ============================================================
 let ultimaPintitaId = 0;
@@ -2170,8 +2047,6 @@ async function inicializar() {
         if (p.id > ultimaPintitaId) ultimaPintitaId = p.id;
       }
     }
-    registrarConceptos(data.slice(-60), false);
-    iniciarFlujoConceptos();
     actualizarEstado();
     setTimeout(ajustarCamaraInicial, 100);
   } catch(e) {
@@ -2213,7 +2088,6 @@ async function consultarNuevas() {
           pintitasMap.set(p.id, true);
           swellIngreso(armN);
           dispararFlash(nueva);
-          registrarConceptos([p], true);
         }, delay);
         if (p.id > ultimaPintitaId) ultimaPintitaId = p.id;
       });
@@ -2239,7 +2113,6 @@ function marcarSinConexion() {
   document.getElementById('estado-texto').textContent = 'sin conexión';
 }
 
-iniciarFlujoConceptos();
 inicializar();
 setInterval(consultarNuevas, POLL_INTERVAL);
 
