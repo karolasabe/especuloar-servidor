@@ -327,7 +327,7 @@ const CATEGORIAS = {
 };
 
 // Perfil tímbrico por categoría: modula el carácter del bordón
-// (filtro, resonancia, metal) y el timbre de los pulsos de colisión.
+// (filtro, resonancia, metal) según la categoría dominante del corpus.
 // Las alturas del bordón NO dependen de esto: quedan ancladas a la
 // serie armónica de 231 Hz para mantenerse consonantes con los ingresos.
 const AUDIO_POR_CATEGORIA = {
@@ -1060,8 +1060,11 @@ function soltarGesto() {
 //    se perciben menos). Decae en ~7.5 s y se funde con la capa.
 //    Un sub de 57.75 Hz da el golpe físico, una vez por relato.
 //
-// 3) COLISIONES: pintitas que se rozan en el corpus disparan pulsos
-//    breves con el timbre de su categoría, paneados según su posición.
+// 3) ESPACIO: dos capas de oleaje (ruido grave filtrado en ondas
+//    lentas y descorrelacionadas que viajan por el estéreo) y una
+//    reverberación de espacio grande por la que pasan el bordón, las
+//    olas y los armónicos de ingreso. El fondo suena como un lugar
+//    con profundidad, no como una nota.
 //
 // El audio se activa con el botón (requisito de gesto de usuario de
 // los navegadores). Parámetro ?audio=on: modo instalación, se activa
@@ -1095,11 +1098,9 @@ const audioSistema = {
   lfoFiltro: null,
   lfoFiltroGain: null,
   voces: [],
+  reverbIn: null,
   activo: false,
   categoriaDominante: 'sensaciones_frias',
-  ultimoPulso: -Infinity,
-  scanIndex: 0,
-  cooldownPares: new Map(),
 };
 
 function audioDisponible() {
@@ -1112,7 +1113,7 @@ function crearAudioSiHaceFalta() {
   const ctxAudio = new AudioCtx();
 
   // Compresor de seguridad: evita clipping cuando coinciden varios
-  // ingresos con la capa basal y los pulsos de colisión
+  // ingresos con la capa basal y el oleaje
   const compresor = ctxAudio.createDynamicsCompressor();
   compresor.threshold.value = -18;
   compresor.knee.value = 24;
@@ -1186,18 +1187,113 @@ function crearAudioSiHaceFalta() {
   lfoFiltro.start();
 
   // Bus de pulsos (colisiones) con delay y retroalimentación suave
+  // REVERBERACIÓN DE ESPACIO
+  // Impulso sintético estéreo (~3.5 s de cola): convierte el conjunto
+  // en un lugar con profundidad. Por aquí pasan el bordón, el oleaje
+  // y los armónicos de ingreso.
+  const reverb = ctxAudio.createConvolver();
+  {
+    const dur = 3.5;
+    const len = Math.floor(ctxAudio.sampleRate * dur);
+    const ir = ctxAudio.createBuffer(2, len, ctxAudio.sampleRate);
+    for (let ch = 0; ch < 2; ch++) {
+      const data = ir.getChannelData(ch);
+      for (let i = 0; i < len; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.8);
+      }
+    }
+    reverb.buffer = ir;
+  }
+  const reverbIn = ctxAudio.createGain();
+  reverbIn.gain.value = 1.0;
+  const reverbReturn = ctxAudio.createGain();
+  reverbReturn.gain.value = 0.34;
+  reverbIn.connect(reverb);
+  reverb.connect(reverbReturn);
+  reverbReturn.connect(master);
+
+  // El bordón se envía parcialmente al espacio
+  const droneSend = ctxAudio.createGain();
+  droneSend.gain.value = 0.45;
+  droneGain.connect(droneSend);
+  droneSend.connect(reverbIn);
+
+  // OLEAJE
+  // Dos capas de ruido grave filtrado. En cada ola, el brillo del
+  // filtro y el volumen suben y bajan juntos (mismo LFO), en ciclos
+  // lentos y descorrelacionados entre capas, mientras un paneo aún
+  // más lento la hace viajar por el estéreo. El resultado: ondas que
+  // crecen y se retiran, nunca un patrón reconocible.
+  const ruidoBuffer = (() => {
+    const dur = 2.5;
+    const len = Math.floor(ctxAudio.sampleRate * dur);
+    const b = ctxAudio.createBuffer(2, len, ctxAudio.sampleRate);
+    for (let ch = 0; ch < 2; ch++) {
+      const data = b.getChannelData(ch);
+      for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+    }
+    return b;
+  })();
+
+  function crearOla(cfg) {
+    const src = ctxAudio.createBufferSource();
+    src.buffer = ruidoBuffer;
+    src.loop = true;
+
+    const filtro = ctxAudio.createBiquadFilter();
+    filtro.type = 'lowpass';
+    filtro.frequency.value = cfg.freqBase;
+    filtro.Q.value = 0.8;
+
+    const g = ctxAudio.createGain();
+    g.gain.value = cfg.gain * 0.5;
+
+    // Un solo LFO gobierna brillo y volumen: la ola sube entera
+    const lfo = ctxAudio.createOscillator();
+    lfo.type = 'sine';
+    lfo.frequency.value = 1 / cfg.ciclo;
+    const lfoFreq = ctxAudio.createGain();
+    lfoFreq.gain.value = cfg.freqMod;
+    lfo.connect(lfoFreq);
+    lfoFreq.connect(filtro.frequency);
+    const lfoAmp = ctxAudio.createGain();
+    lfoAmp.gain.value = cfg.gain * 0.5;
+    lfo.connect(lfoAmp);
+    lfoAmp.connect(g.gain);
+
+    const pan = ctxAudio.createStereoPanner ? ctxAudio.createStereoPanner() : null;
+    const lfoPan = ctxAudio.createOscillator();
+    lfoPan.type = 'sine';
+    lfoPan.frequency.value = 1 / cfg.cicloPan;
+    const lfoPanGain = ctxAudio.createGain();
+    lfoPanGain.gain.value = 0.45;
+
+    src.connect(filtro);
+    filtro.connect(g);
+    if (pan) {
+      lfoPan.connect(lfoPanGain);
+      lfoPanGain.connect(pan.pan);
+      g.connect(pan);
+      pan.connect(master);
+      pan.connect(reverbIn);
+    } else {
+      g.connect(master);
+      g.connect(reverbIn);
+    }
+    src.start();
+    lfo.start();
+    lfoPan.start();
+  }
+
+  // Ola grave, lenta y ancha; ola media, más ligera y móvil
+  crearOla({ freqBase: 200, freqMod: 130, gain: 0.052, ciclo: 26, cicloPan: 47 });
+  crearOla({ freqBase: 430, freqMod: 250, gain: 0.026, ciclo: 15, cicloPan: 31 });
+
+  // Bus de la confirmación de activación (con eco leve hacia el espacio)
   const pulseBus = ctxAudio.createGain();
   pulseBus.gain.value = 1.35;
   pulseBus.connect(master);
-
-  const delay = ctxAudio.createDelay(0.8);
-  const feedback = ctxAudio.createGain();
-  delay.delayTime.value = 0.18;
-  feedback.gain.value = 0.16;
-  pulseBus.connect(delay);
-  delay.connect(feedback);
-  feedback.connect(delay);
-  delay.connect(master);
+  pulseBus.connect(reverbIn);
 
   Object.assign(audioSistema, {
     ctx: ctxAudio,
@@ -1209,6 +1305,7 @@ function crearAudioSiHaceFalta() {
     lfoFiltro,
     lfoFiltroGain,
     voces,
+    reverbIn,
   });
   aplicarPerfilAudio(audioSistema.categoriaDominante);
   return true;
@@ -1313,6 +1410,7 @@ function swellIngreso(armN) {
 
   osc.connect(g);
   g.connect(audioSistema.master);
+  if (audioSistema.reverbIn) g.connect(audioSistema.reverbIn);
   osc.start(t0);
   osc.stop(t0 + 7.7);
   osc.onended = () => { osc.disconnect(); g.disconnect(); };
@@ -1349,118 +1447,6 @@ function subPulsoIngreso() {
   osc.start(t0);
   osc.stop(t0 + 5.4);
   osc.onended = () => { osc.disconnect(); g.disconnect(); };
-}
-
-// Pulso de colisión (Codex): timbre según la categoría, paneo
-// estéreo según la posición horizontal en el mundo
-function dispararPulsoAudio(cat, intensidad = 0.45, worldX = 0) {
-  if (!audioSistema.activo || !audioSistema.ctx || audioSistema.ctx.state !== 'running') return;
-  const perfil = AUDIO_POR_CATEGORIA[cat] || AUDIO_POR_CATEGORIA.sensaciones_frias;
-  const ctxAudio = audioSistema.ctx;
-  const ahora = ctxAudio.currentTime;
-  const vida = 0.18 + perfil.metal * 0.10 + intensidad * 0.08;
-  const osc = ctxAudio.createOscillator();
-  const gain = ctxAudio.createGain();
-  const filtro = ctxAudio.createBiquadFilter();
-  const pan = ctxAudio.createStereoPanner ? ctxAudio.createStereoPanner() : null;
-
-  osc.type = perfil.metal > 0.55 ? 'triangle' : 'sine';
-  osc.frequency.setValueAtTime(perfil.pulso * (0.92 + Math.random() * 0.18), ahora);
-  osc.frequency.exponentialRampToValueAtTime(Math.max(42, perfil.pulso * (0.62 + perfil.metal * 0.12)), ahora + vida);
-  filtro.type = perfil.metal > 0.45 ? 'bandpass' : 'lowpass';
-  filtro.frequency.value = perfil.pulso * (1.6 + perfil.metal * 2.4);
-  filtro.Q.value = perfil.q + intensidad * 2.2;
-  gain.gain.setValueAtTime(0.0001, ahora);
-  gain.gain.exponentialRampToValueAtTime(0.045 + intensidad * 0.120, ahora + 0.012);
-  gain.gain.exponentialRampToValueAtTime(0.0001, ahora + vida);
-
-  osc.connect(filtro);
-  filtro.connect(gain);
-  if (pan) {
-    const mundo = Math.max(1, getWorldRadius());
-    pan.pan.value = Math.max(-0.75, Math.min(0.75, (worldX - cam.x) / mundo));
-    gain.connect(pan);
-    pan.connect(audioSistema.pulseBus);
-  } else {
-    gain.connect(audioSistema.pulseBus);
-  }
-
-  osc.start(ahora);
-  osc.stop(ahora + vida + 0.05);
-  osc.onended = () => {
-    osc.disconnect();
-    filtro.disconnect();
-    gain.disconnect();
-    if (pan) pan.disconnect();
-  };
-
-  if (perfil.metal > 0.36 && Math.random() < perfil.metal) {
-    const dur = 0.075 + perfil.metal * 0.045;
-    const buffer = ctxAudio.createBuffer(1, Math.floor(ctxAudio.sampleRate * dur), ctxAudio.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < data.length; i++) {
-      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 2.6);
-    }
-    const noise = ctxAudio.createBufferSource();
-    const nGain = ctxAudio.createGain();
-    const nFilter = ctxAudio.createBiquadFilter();
-    noise.buffer = buffer;
-    nFilter.type = 'highpass';
-    nFilter.frequency.value = 900 + perfil.metal * 1800;
-    nGain.gain.setValueAtTime(0.0001, ahora);
-    nGain.gain.exponentialRampToValueAtTime(0.026 + intensidad * 0.045, ahora + 0.008);
-    nGain.gain.exponentialRampToValueAtTime(0.0001, ahora + dur);
-    noise.connect(nFilter);
-    nFilter.connect(nGain);
-    nGain.connect(audioSistema.pulseBus);
-    noise.start(ahora);
-    noise.stop(ahora + dur + 0.02);
-    noise.onended = () => {
-      noise.disconnect();
-      nFilter.disconnect();
-      nGain.disconnect();
-    };
-  }
-}
-
-// Colisiones (Codex): detecta pintitas que se rozan y dispara pulsos
-// con cooldown por par, muestreando el corpus de forma incremental
-function detectarColapsosAudio() {
-  if (!audioSistema.activo || !audioSistema.ctx || pintitas.length < 2) return;
-  if (tiempoGlobal - audioSistema.ultimoPulso < 95) return;
-  const muestras = Math.min(150, pintitas.length);
-  let disparados = 0;
-  for (let n = 0; n < muestras && disparados < 2; n++) {
-    const idx = (audioSistema.scanIndex + n) % pintitas.length;
-    const p = pintitas[idx];
-    if (!p || p.opacidadFiltro < 0.45) continue;
-    const vecinos = getVecinos(p.x, p.y);
-    for (const o of vecinos) {
-      if (o === p || o.id <= p.id || o.opacidadFiltro < 0.45) continue;
-      const dx = o.x - p.x;
-      const dy = o.y - p.y;
-      const dist2 = dx * dx + dy * dy;
-      const umbral = BLOB_RADIO_BASE * (1.2 + (p.tamFactor + o.tamFactor) * 0.24);
-      if (dist2 > umbral * umbral) continue;
-      if (p.categoria !== o.categoria && Math.random() > 0.18) continue;
-      const key = `${p.id}:${o.id}`;
-      if ((audioSistema.cooldownPares.get(key) || 0) > tiempoGlobal) continue;
-      const dist = Math.sqrt(dist2);
-      const intensidad = Math.max(0.16, 1 - dist / umbral) * (p.categoria === o.categoria ? 1 : 0.68);
-      audioSistema.cooldownPares.set(key, tiempoGlobal + 1500 + Math.random() * 1800);
-      audioSistema.ultimoPulso = tiempoGlobal;
-      dispararPulsoAudio(p.categoria, intensidad, (p.x + o.x) * 0.5);
-      disparados++;
-      break;
-    }
-  }
-  audioSistema.scanIndex = (audioSistema.scanIndex + muestras) % Math.max(1, pintitas.length);
-  if (audioSistema.cooldownPares.size > 900) {
-    for (const [key, vence] of audioSistema.cooldownPares) {
-      if (vence < tiempoGlobal) audioSistema.cooldownPares.delete(key);
-      if (audioSistema.cooldownPares.size <= 520) break;
-    }
-  }
 }
 
 // Modo instalación: ?audio=on activa el audio con el primer
@@ -1524,7 +1510,6 @@ function render() {
     const vecinos = getVecinos(p.x, p.y);
     p.actualizar(dt, hoverWorldX, hoverWorldY, mouseVel, vecinos, isDragging, gesto);
   }
-  detectarColapsosAudio();
 
   ctx.globalCompositeOperation = 'source-over';
   ctx.clearRect(0, 0, W, H);
