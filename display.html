@@ -286,7 +286,7 @@
     <button class="modal-cerrar" onclick="cerrarModal()">cerrar</button>
     <div class="modal-categorias" id="modal-cats"></div>
     <div class="modal-relato" id="modal-texto"></div>
-    <button class="modal-traducir" id="modal-traducir" onclick="toggleTraduccion()">ver en español</button>
+    <button class="modal-traducir" id="modal-traducir" type="button" onclick="toggleTraduccion()">see in English</button>
   </div>
 </div>
 
@@ -1881,22 +1881,43 @@ canvas.addEventListener('touchend', async (e) => {
 // ============================================================
 // MODAL (con traducción)
 // ============================================================
+// Se muestra siempre el relato original. El botón ofrece la traducción
+// al otro idioma (español <-> inglés). La traducción la hace el servidor
+// (/traducir) y queda guardada en la base, así que cada relato se traduce
+// una sola vez por idioma.
+const TEXTOS_TRADUCCION = {
+  en: { ver: 'see in English', original: 'ver original', cargando: 'translating...', error: 'translation unavailable' },
+  es: { ver: 'ver en español', original: 'see original', cargando: 'traduciendo...', error: 'traducción no disponible' }
+};
+let _relatoId = null;
 let _relatoOriginal = '';
-let _relatoTraducido = null;
+let _idiomaDestino = 'es';
+let _traducciones = {};
 let _mostrandoTraduccion = false;
+let _traduciendo = false;
+
+function _textoBotonTraduccion() {
+  const t = TEXTOS_TRADUCCION[_idiomaDestino];
+  return _mostrandoTraduccion ? t.original : t.ver;
+}
 
 async function abrirRelato(respuestaId) {
   try {
     const res = await fetch(`${API_BASE}/relato/${respuestaId}`);
+    if (!res.ok) return;
     const data = await res.json();
-    if (data.status === 'error') return;
+    if (data.status === 'error' || data.error) return;
+    _relatoId = respuestaId;
     _relatoOriginal = data.relato || '(sin contenido)';
-    _relatoTraducido = data.relato_traducido || null;
+    _idiomaDestino = data.idioma === 'en' ? 'es' : 'en';
+    _traducciones = data.traducciones || {};
     _mostrandoTraduccion = false;
+    _traduciendo = false;
     document.getElementById('modal-texto').textContent = _relatoOriginal;
     const btn = document.getElementById('modal-traducir');
-    btn.style.display = data.idioma === 'en' ? 'block' : 'none';
-    btn.textContent = 'ver en español';
+    btn.style.display = data.relato ? 'block' : 'none';
+    btn.disabled = false;
+    btn.textContent = _textoBotonTraduccion();
     // categorias_activadas puede llegar como objeto o como lista
     const catsData = data.categorias_activadas || {};
     const listaCats = Array.isArray(catsData) ? catsData : Object.keys(catsData);
@@ -1911,36 +1932,55 @@ async function abrirRelato(respuestaId) {
 async function toggleTraduccion() {
   const btn = document.getElementById('modal-traducir');
   const caja = document.getElementById('modal-texto');
+  if (_traduciendo) return;
   if (_mostrandoTraduccion) {
     caja.textContent = _relatoOriginal;
-    btn.textContent = 'ver en español';
     _mostrandoTraduccion = false;
+    btn.textContent = _textoBotonTraduccion();
     return;
   }
-  if (_relatoTraducido) {
-    caja.textContent = _relatoTraducido;
-    btn.textContent = 'ver original';
+  const destino = _idiomaDestino;
+  if (_traducciones[destino]) {
+    caja.textContent = _traducciones[destino];
     _mostrandoTraduccion = true;
+    btn.textContent = _textoBotonTraduccion();
     return;
   }
-  btn.textContent = 'traduciendo...';
+  const idPedido = _relatoId;
+  _traduciendo = true;
+  btn.disabled = true;
+  btn.textContent = TEXTOS_TRADUCCION[destino].cargando;
+  let texto = null;
   try {
-    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(_relatoOriginal)}&langpair=en|es`;
-    const res = await fetch(url);
-    const json = await res.json();
-    _relatoTraducido = json.responseData.translatedText;
-    caja.textContent = _relatoTraducido;
-    btn.textContent = 'ver original';
+    const res = await fetch(`${API_BASE}/traducir/${idPedido}?a=${destino}`, { method: 'POST' });
+    if (res.ok) {
+      const json = await res.json();
+      texto = json.texto || null;
+    }
+  } catch (e) { console.error(e); }
+  _traduciendo = false;
+  btn.disabled = false;
+  // Si mientras tanto se cerró el modal o se abrió otro relato, no se pisa.
+  if (_relatoId !== idPedido) return;
+  if (texto) {
+    _traducciones[destino] = texto;
+    caja.textContent = texto;
     _mostrandoTraduccion = true;
-  } catch {
-    btn.textContent = 'ver en español';
+    btn.textContent = _textoBotonTraduccion();
+  } else {
+    btn.textContent = TEXTOS_TRADUCCION[destino].error;
+    setTimeout(() => {
+      if (_relatoId === idPedido && !_mostrandoTraduccion) btn.textContent = _textoBotonTraduccion();
+    }, 2500);
   }
 }
 
 function cerrarModal() {
   document.getElementById('modal').classList.remove('activo');
-  _relatoTraducido = null;
+  _relatoId = null;
+  _traducciones = {};
   _mostrandoTraduccion = false;
+  _traduciendo = false;
 }
 document.getElementById('modal').addEventListener('click', (e) => {
   if (e.target.id === 'modal') cerrarModal();
