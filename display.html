@@ -336,7 +336,9 @@ const CATEGORIAS = {
   'placer_deseo':          { color: '#FF2D8A', nombre: 'Placer / deseo',          nombre_en: 'Pleasure / desire' },
   'profesional_hombre':    { color: '#4A7BAF', nombre: 'Profesional hombre',      nombre_en: 'Male professional' },
   'profesional_mujer':     { color: '#F5DD2C', nombre: 'Profesional mujer',       nombre_en: 'Female professional' },
-  'artefactos_procedimientos': { color: '#7C8A99', nombre: 'Artefactos / procedimientos', nombre_en: 'Artifacts / procedures' }
+  'artefactos_procedimientos': { color: '#7C8A99', nombre: 'Artefactos / procedimientos', nombre_en: 'Artifacts / procedures' },
+  // Relatos que no activan ninguna otra categoría: el servidor les asigna esta.
+  'emergentes':            { color: '#9A8CFF', nombre: 'Emergentes',              nombre_en: 'Emergent' }
 };
 
 function nombreCategoria(cat, idioma) {
@@ -373,7 +375,8 @@ const AUDIO_POR_CATEGORIA = {
   'placer_deseo':         { filtro: 820,  pulso: 260, q: 1.2, metal: 0.14 },
   'profesional_hombre':   { filtro: 980,  pulso: 310, q: 2.1, metal: 0.34 },
   'profesional_mujer':    { filtro: 860,  pulso: 260, q: 1.4, metal: 0.18 },
-  'artefactos_procedimientos': { filtro: 1100, pulso: 340, q: 2.4, metal: 0.50 }
+  'artefactos_procedimientos': { filtro: 1100, pulso: 340, q: 2.4, metal: 0.50 },
+  'emergentes':           { filtro: 1180, pulso: 360, q: 1.6, metal: 0.26 }
 };
 
 const filtrosActivos = {};

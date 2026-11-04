@@ -1407,6 +1407,15 @@ CATEGORIAS = {
             'aspiration','termination','three grounds law','medico-legal exam',
             'rape kit','forensic kit','swabbing','samples','dna','virginity exam'
         ]
+    },
+    # Relatos que no activan ninguna otra categoría. No tiene palabras:
+    # la asigna analizar_relato cuando el resultado queda vacío, para que
+    # ninguna voz desaparezca del display.
+    'emergentes': {
+        'color': '#9A8CFF',
+        'nombre_es': 'emergentes',
+        'nombre_en': 'emergent',
+        'palabras': []
     }
 }
 
@@ -1434,13 +1443,66 @@ def quitar_tildes(texto):
 # iniciar el servidor. Cada palabra del diccionario se normaliza y
 # se compila con límite de palabra, para no volver a hacerlo en cada
 # relato que llega por el webhook.
+# AMPLIACIÓN DE FORMAS (noviembre 2026)
+# El diccionario guarda formas exactas: "trauma" no reconocía "traumada"
+# ni "metal" reconocía "metálicos". Cada entrada de UNA palabra se amplía
+# con una lista CERRADA de terminaciones, no con una raíz abierta: una raíz
+# abierta convertía "especular" en espéculo, "relativo" en relato,
+# "artículo" en ártico, "placentero" en placenta y "vaginismo" en vagina.
+#   - raíz de 5 letras o más (la palabra sin su vocal final): género y
+#     número, adjetivos y participios (-ico, -oso, -ado, -ido, -ático,
+#     -atizado, -ito) y algunas formas verbales (-ó, -aba, -aron, -ando).
+#   - raíz más corta: solo género y número (frío -> fríos, fría, frías).
+#   - categorías de profesional: solo singular y plural, porque el género
+#     es justamente lo que distingue "médico" de "médica".
+# Las entradas de varias palabras ("trauma sexual") se mantienen exactas.
+RAIZ_MINIMA = 5
+CATEGORIAS_GENERO_FIJO = {'profesional_hombre', 'profesional_mujer'}
+_FLEXION = ['o', 'a', 'os', 'as', 'e', 'es', 's']
+_DERIVACION = [
+    'ado', 'ada', 'ados', 'adas', 'ido', 'ida', 'idos', 'idas',
+    'ico', 'ica', 'icos', 'icas', 'oso', 'osa', 'osos', 'osas',
+    'ito', 'ita', 'itos', 'itas',
+    'atico', 'atica', 'aticos', 'aticas',
+    'atizado', 'atizada', 'atizados', 'atizadas',
+    'io', 'aba', 'aban', 'aron', 'ieron', 'ando', 'iendo', 'aran', 'ara',
+]
+
+def _alternativa(sufijos):
+    return '(?:' + '|'.join(sorted(set(sufijos), key=len, reverse=True)) + ')?'
+
+def _patron_entrada(palabra, cat):
+    w = quitar_tildes(palabra.lower()).strip()
+    if not w:
+        return None
+    if ' ' in w or not re.fullmatch(r'[a-zñ]+', w):
+        nucleo = re.escape(w)
+    elif cat in CATEGORIAS_GENERO_FIJO:
+        nucleo = re.escape(w) + r'(?:s|es)?'
+    else:
+        raiz = w[:-1] if w[-1] in 'aeo' else w
+        if len(raiz) >= RAIZ_MINIMA:
+            # la propia palabra también vale tal como está en el diccionario
+            nucleo = '(?:' + re.escape(w) + '|' + re.escape(raiz) + _alternativa(_FLEXION + _DERIVACION) + ')'
+        elif w[-1] in 'oa':
+            nucleo = re.escape(w[:-1]) + r'(?:o|os|a|as)'
+        elif w[-1] == 'e':
+            nucleo = re.escape(w) + r's?'
+        else:
+            nucleo = re.escape(w) + r'(?:es)?'
+    return re.compile(r'(?<!\w)' + nucleo + r'(?!\w)')
+
 _PATRONES_CATEGORIA = {
-    cat: [
-        re.compile(r'(?<!\w)' + re.escape(quitar_tildes(palabra.lower())) + r'(?!\w)')
-        for palabra in datos['palabras']
-    ]
+    cat: [(palabra, pat) for palabra in datos['palabras']
+          for pat in [_patron_entrada(palabra, cat)] if pat is not None]
     for cat, datos in CATEGORIAS.items()
 }
+
+def palabras_activadas(texto):
+    """Devuelve {categoria: [entradas del diccionario que coinciden]}."""
+    texto_normalizado = quitar_tildes(texto.lower())
+    return {cat: [palabra for palabra, pat in patrones if pat.search(texto_normalizado)]
+            for cat, patrones in _PATRONES_CATEGORIA.items()}
 
 # ============================================================
 # BASE DE DATOS
@@ -1565,15 +1627,18 @@ def traducir_texto(texto, destino):
 # ============================================================
 # ANÁLISIS SEMÁNTICO
 # ============================================================
+INTENSIDAD_EMERGENTES = 0.5
+
 def analizar_relato(texto):
-    texto_normalizado = quitar_tildes(texto.lower())
     resultado = {}
-    for cat, patrones in _PATRONES_CATEGORIA.items():
-        menciones = sum(1 for patron in patrones if patron.search(texto_normalizado))
+    palabras_texto = max(1, len(texto.split()))
+    for cat, coincidencias in palabras_activadas(texto).items():
+        menciones = len(coincidencias)
         if menciones > 0:
-            palabras_texto = max(1, len(texto.split()))
             intensidad = min(1.0, menciones / max(1, palabras_texto / 20))
             resultado[cat] = round(intensidad, 3)
+    if not resultado:
+        resultado['emergentes'] = INTENSIDAD_EMERGENTES
     return resultado
 
 def detectar_idioma(texto):
