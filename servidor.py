@@ -1456,6 +1456,20 @@ def quitar_tildes(texto):
 #   - categorías de profesional: solo singular y plural, porque el género
 #     es justamente lo que distingue "médico" de "médica".
 # Las entradas de varias palabras ("trauma sexual") se mantienen exactas.
+# AMPLIACIONES APROBADAS POR KAROLA
+# Entradas agregadas al diccionario original. Se mantienen aparte para
+# revisar fácilmente qué se sumó y cuándo.
+AMPLIACION_DICCIONARIO = {
+    # 2026-11-03: "trauma" no estaba como palabra suelta ("quedé traumada"
+    # no activaba nada). Con la ampliación de formas cubre traumada,
+    # traumado, traumas, traumático, traumática y traumatizada.
+    'miedo': ['trauma', 'traumatic', 'traumatized'],
+}
+for _cat, _palabras in AMPLIACION_DICCIONARIO.items():
+    for _p in _palabras:
+        if _p not in CATEGORIAS[_cat]['palabras']:
+            CATEGORIAS[_cat]['palabras'].append(_p)
+
 RAIZ_MINIMA = 5
 CATEGORIAS_GENERO_FIJO = {'profesional_hombre', 'profesional_mujer'}
 _FLEXION = ['o', 'a', 'os', 'as', 'e', 'es', 's']
