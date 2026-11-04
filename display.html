@@ -181,6 +181,18 @@
   .leyenda-item:hover { color: #bbb; }
   .leyenda-item.apagado { opacity: 0.28; }
   .leyenda-dot { width: 8px; height: 8px; border-radius: 50%; transition: opacity 0.25s; flex-shrink: 0; }
+  .leyenda-idioma {
+    display: flex; align-items: center; gap: 4px;
+    font-size: 9px; color: #444; letter-spacing: 0.08em;
+    padding: 3px 2px; margin-left: auto;
+  }
+  .leyenda-idioma button {
+    background: none; border: 0; padding: 0 2px; cursor: pointer;
+    font: inherit; letter-spacing: inherit; color: #555;
+    transition: color 0.25s;
+  }
+  .leyenda-idioma button:hover { color: #bbb; }
+  .leyenda-idioma button[aria-pressed="true"] { color: #ddd; }
 
   .estado { text-align: right; }
   .estado-dot { width: 5px; height: 5px; border-radius: 50%; background: #1a1a1a; display: inline-block; margin-right: 5px; vertical-align: middle; }
@@ -239,6 +251,7 @@
     }
     .leyenda-item { font-size: 7.2px; gap: 4px; padding: 2px 0; line-height: 1.15; color: rgba(220,210,198,0.62); }
     .leyenda-dot { width: 7px; height: 7px; }
+    .leyenda-idioma { font-size: 7.2px; padding: 2px 0; }
     .estado-texto { color: rgba(220,210,198,0.54); }
     .zoom-hint { display: none; }
     .modal-contenido { padding: 1.4rem; font-size: 12.5px; }
@@ -310,20 +323,39 @@ const API_BASE = (_esRedLocal && window.location.protocol.startsWith('http'))
     : (window.location.protocol === 'file:' ? 'http://127.0.0.1:5000' : RENDER_API);
 const POLL_INTERVAL = 5000;
 
+// nombre = español; nombre_en = inglés (mismos términos que nombre_en en servidor.py).
 const CATEGORIAS = {
-  'dolor_fisico':          { color: '#FF2424', nombre: 'Dolor físico' },
-  'miedo':                 { color: '#A01F35', nombre: 'Miedo' },
-  'verguenza_exposicion':  { color: '#C4943D', nombre: 'Vergüenza / exposición' },
-  'sensaciones_frias':     { color: '#2EC4D8', nombre: 'Sensaciones frías' },
-  'sensaciones_calidas':   { color: '#E8935A', nombre: 'Sensaciones cálidas' },
-  'sonido':                { color: '#6BBF8A', nombre: 'Sonido / acústica' },
-  'aromas':                { color: '#E8E0D4', nombre: 'Aromas / olores' },
-  'violencia_sexual':      { color: '#B814E8', nombre: 'Violencia sexual' },
-  'placer_deseo':          { color: '#FF2D8A', nombre: 'Placer / deseo' },
-  'profesional_hombre':    { color: '#4A7BAF', nombre: 'Profesional hombre' },
-  'profesional_mujer':     { color: '#F5DD2C', nombre: 'Profesional mujer' },
-  'artefactos_procedimientos': { color: '#7C8A99', nombre: 'Artefactos / procedimientos' }
+  'dolor_fisico':          { color: '#FF2424', nombre: 'Dolor físico',            nombre_en: 'Physical pain' },
+  'miedo':                 { color: '#A01F35', nombre: 'Miedo',                   nombre_en: 'Fear' },
+  'verguenza_exposicion':  { color: '#C4943D', nombre: 'Vergüenza / exposición',  nombre_en: 'Shame / exposure' },
+  'sensaciones_frias':     { color: '#2EC4D8', nombre: 'Sensaciones frías',       nombre_en: 'Cold sensations' },
+  'sensaciones_calidas':   { color: '#E8935A', nombre: 'Sensaciones cálidas',     nombre_en: 'Warm sensations' },
+  'sonido':                { color: '#6BBF8A', nombre: 'Sonido / acústica',       nombre_en: 'Sound / acoustics' },
+  'aromas':                { color: '#E8E0D4', nombre: 'Aromas / olores',         nombre_en: 'Aromas / smells' },
+  'violencia_sexual':      { color: '#B814E8', nombre: 'Violencia sexual',        nombre_en: 'Sexual violence' },
+  'placer_deseo':          { color: '#FF2D8A', nombre: 'Placer / deseo',          nombre_en: 'Pleasure / desire' },
+  'profesional_hombre':    { color: '#4A7BAF', nombre: 'Profesional hombre',      nombre_en: 'Male professional' },
+  'profesional_mujer':     { color: '#F5DD2C', nombre: 'Profesional mujer',       nombre_en: 'Female professional' },
+  'artefactos_procedimientos': { color: '#7C8A99', nombre: 'Artefactos / procedimientos', nombre_en: 'Artifacts / procedures' }
 };
+
+function nombreCategoria(cat, idioma) {
+  const info = CATEGORIAS[cat];
+  if (!info) return cat;
+  return (idioma === 'en' && info.nombre_en) ? info.nombre_en : info.nombre;
+}
+
+// Idioma de la leyenda: ?idioma=en|es en la URL manda; si no, la última
+// elección guardada en este navegador; si no, español.
+let idiomaLeyenda = 'es';
+(() => {
+  const param = new URLSearchParams(window.location.search).get('idioma');
+  if (param === 'en' || param === 'es') { idiomaLeyenda = param; return; }
+  try {
+    const guardado = localStorage.getItem('especuloar_idioma_leyenda');
+    if (guardado === 'en' || guardado === 'es') idiomaLeyenda = guardado;
+  } catch (e) {}
+})();
 
 // Perfil tímbrico por categoría: modula el carácter del bordón
 // (filtro, resonancia, metal) según la categoría dominante del corpus.
@@ -1891,10 +1923,21 @@ const TEXTOS_TRADUCCION = {
 };
 let _relatoId = null;
 let _relatoOriginal = '';
+let _idiomaOriginal = 'es';
 let _idiomaDestino = 'es';
+let _categoriasModal = [];
 let _traducciones = {};
 let _mostrandoTraduccion = false;
 let _traduciendo = false;
+
+// Las etiquetas de categoría siguen el idioma del texto que se está viendo.
+function pintarChipsModal() {
+  const idioma = _mostrandoTraduccion ? _idiomaDestino : _idiomaOriginal;
+  document.getElementById('modal-cats').innerHTML = _categoriasModal.map(cat => {
+    const info = CATEGORIAS[cat] || { color: '#888' };
+    return `<span class="modal-cat-chip" style="background:${info.color}">${nombreCategoria(cat, idioma)}</span>`;
+  }).join('');
+}
 
 function _textoBotonTraduccion() {
   const t = TEXTOS_TRADUCCION[_idiomaDestino];
@@ -1909,7 +1952,8 @@ async function abrirRelato(respuestaId) {
     if (data.status === 'error' || data.error) return;
     _relatoId = respuestaId;
     _relatoOriginal = data.relato || '(sin contenido)';
-    _idiomaDestino = data.idioma === 'en' ? 'es' : 'en';
+    _idiomaOriginal = data.idioma === 'en' ? 'en' : 'es';
+    _idiomaDestino = _idiomaOriginal === 'en' ? 'es' : 'en';
     _traducciones = data.traducciones || {};
     _mostrandoTraduccion = false;
     _traduciendo = false;
@@ -1920,11 +1964,8 @@ async function abrirRelato(respuestaId) {
     btn.textContent = _textoBotonTraduccion();
     // categorias_activadas puede llegar como objeto o como lista
     const catsData = data.categorias_activadas || {};
-    const listaCats = Array.isArray(catsData) ? catsData : Object.keys(catsData);
-    document.getElementById('modal-cats').innerHTML = listaCats.map(cat => {
-      const info = CATEGORIAS[cat] || { color: '#888', nombre: cat };
-      return `<span class="modal-cat-chip" style="background:${info.color}">${info.nombre}</span>`;
-    }).join('');
+    _categoriasModal = Array.isArray(catsData) ? catsData : Object.keys(catsData);
+    pintarChipsModal();
     document.getElementById('modal').classList.add('activo');
   } catch(e) { console.error(e); }
 }
@@ -1937,6 +1978,7 @@ async function toggleTraduccion() {
     caja.textContent = _relatoOriginal;
     _mostrandoTraduccion = false;
     btn.textContent = _textoBotonTraduccion();
+    pintarChipsModal();
     return;
   }
   const destino = _idiomaDestino;
@@ -1944,6 +1986,7 @@ async function toggleTraduccion() {
     caja.textContent = _traducciones[destino];
     _mostrandoTraduccion = true;
     btn.textContent = _textoBotonTraduccion();
+    pintarChipsModal();
     return;
   }
   const idPedido = _relatoId;
@@ -1967,6 +2010,7 @@ async function toggleTraduccion() {
     caja.textContent = texto;
     _mostrandoTraduccion = true;
     btn.textContent = _textoBotonTraduccion();
+    pintarChipsModal();
   } else {
     btn.textContent = TEXTOS_TRADUCCION[destino].error;
     setTimeout(() => {
@@ -2008,14 +2052,37 @@ function clickCategoria(cat, soloEsta) {
   actualizarLeyenda();
 }
 
+function cambiarIdiomaLeyenda(idioma) {
+  if (idioma === idiomaLeyenda) return;
+  idiomaLeyenda = idioma;
+  try { localStorage.setItem('especuloar_idioma_leyenda', idioma); } catch (e) {}
+  actualizarLeyenda();
+}
+
 function actualizarLeyenda() {
   const cont = document.getElementById('leyenda');
-  cont.innerHTML = Object.entries(CATEGORIAS).map(([k, v]) => {
+  const ayuda = idiomaLeyenda === 'en'
+    ? 'Click: hide - Shift+click: isolate'
+    : 'Click: ocultar - Shift+click: aislar';
+  const items = Object.entries(CATEGORIAS).map(([k, v]) => {
     const cls = filtrosActivos[k] ? '' : ' apagado';
-    return `<div class="leyenda-item${cls}" data-cat="${k}" role="button" tabindex="0" title="Click: ocultar · Shift+click: aislar">
-      <span class="leyenda-dot" style="background:${v.color}"></span>${v.nombre}
+    return `<div class="leyenda-item${cls}" data-cat="${k}" role="button" tabindex="0" title="${ayuda}">
+      <span class="leyenda-dot" style="background:${v.color}"></span>${nombreCategoria(k, idiomaLeyenda)}
     </div>`;
   }).join('');
+  const selector = `<div class="leyenda-idioma" role="group" aria-label="idioma / language">
+      <button type="button" data-idioma="es" aria-pressed="${idiomaLeyenda === 'es'}">ES</button>
+      <span aria-hidden="true">/</span>
+      <button type="button" data-idioma="en" aria-pressed="${idiomaLeyenda === 'en'}">EN</button>
+    </div>`;
+  cont.innerHTML = items + selector;
+  cont.querySelectorAll('.leyenda-idioma button').forEach(b => {
+    b.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      cambiarIdiomaLeyenda(b.dataset.idioma);
+    });
+    b.addEventListener('touchstart', (e) => e.stopPropagation(), { passive: true });
+  });
   cont.querySelectorAll('.leyenda-item').forEach(el => {
     el.addEventListener('click', (e) => clickCategoria(el.dataset.cat, e.shiftKey));
     el.addEventListener('keydown', (e) => {
