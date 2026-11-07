@@ -1548,14 +1548,15 @@ let transicionGalaxia = false;
 let ritualEnCurso = false;
 let versionDiccionario = null;
 const esperar = (ms) => new Promise(r => setTimeout(r, ms));
-// ?ritual=SEGUNDOS fija cuánto tarda en empezar a entrar el último relato
-// (por defecto 30). Con ?ritual=1 entran casi todos a la vez.
-const RITUAL_SEGUNDOS = Number(new URLSearchParams(window.location.search).get('ritual')) || 30;
-// Con muchos ingresos casi simultáneos, destellos y sonidos se espacian
-// para no saturar la imagen ni el audio.
-const RITUAL_FLASH_MIN_MS = 350;
+// ?ritual=SEGUNDOS fija cuánto tarda en empezar a entrar el último lote
+// (por defecto 30). ?lote=N fija cuántos relatos entran juntos (por defecto 10).
+const _paramsRitual = new URLSearchParams(window.location.search);
+const RITUAL_SEGUNDOS = Number(_paramsRitual.get('ritual')) || 30;
+const RITUAL_LOTE = Math.max(1, Math.round(Number(_paramsRitual.get('lote')) || 10));
+// Dentro de un lote, los sonidos de ingreso se espacian para no saturar el audio.
 const RITUAL_SONIDO_MIN_MS = 240;
-const RITUAL_PULSO_MIN_MS = 900;
+// Datos del reingreso mientras la pantalla espera en negro el accionador.
+let ritualEspera = null;
 
 function fundir(hasta, ms) {
   fundido.desde = fundido.valor;
@@ -1591,27 +1592,49 @@ async function recomponerGalaxia({ ritual }) {
     vaciarGalaxia();
     for (const p of data) if (p.id > ultimaPintitaId) ultimaPintitaId = p.id;
     if (!ritual) {
-      for (const p of data) {
-        pintitas.push(new Pintita(p.id, p.respuesta_id, p.categoria, false));
-        pintitasMap.set(p.id, true);
-      }
+      reponerGalaxia(data);
       await fundir(0, 2200);
     } else {
-      // se registran ya, para que el sondeo de relatos nuevos no las duplique
+      // Pantalla en negro, esperando el accionador (Espacio o Enter).
+      // Las pintitas se registran ya, para que el sondeo no las duplique.
       for (const p of data) pintitasMap.set(p.id, true);
       document.getElementById('n-respuestas').textContent = '0';
       ritualEnCurso = true;
-      await esperar(700);
-      await fundir(0, 1300);
-      iniciarRitual(data);
+      ritualEspera = data;
     }
   } catch (e) {
     console.error(e);
     ritualEnCurso = false;
+    ritualEspera = null;
     await fundir(0, 800);
   } finally {
     transicionGalaxia = false;
   }
+}
+
+function reponerGalaxia(data) {
+  for (const p of data) {
+    pintitas.push(new Pintita(p.id, p.respuesta_id, p.categoria, false));
+    pintitasMap.set(p.id, true);
+  }
+}
+
+// Accionador: con la pantalla en negro, Espacio o Enter lanzan el reingreso.
+async function accionarRitual() {
+  const data = ritualEspera;
+  ritualEspera = null;
+  await fundir(0, 1300);
+  iniciarRitual(data);
+}
+
+// Escape con la pantalla en negro: vuelve la galaxia completa, sin ritual.
+async function cancelarRitual() {
+  const data = ritualEspera;
+  ritualEspera = null;
+  reponerGalaxia(data);
+  await fundir(0, 1500);
+  ritualEnCurso = false;
+  actualizarEstado();
 }
 
 function iniciarRitual(data) {
@@ -1622,45 +1645,52 @@ function iniciarRitual(data) {
     porRelato.get(p.respuesta_id).push(p);
   }
   const grupos = [...porRelato.values()];
-  const intervalo = (RITUAL_SEGUNDOS * 1000) / Math.max(1, grupos.length);
+  // Lotes de RITUAL_LOTE relatos, en orden de llegada. Cada lote entra junto
+  // con un golpe grave y un destello; el contador sube de a un lote.
+  const lotes = [];
+  for (let k = 0; k < grupos.length; k += RITUAL_LOTE) lotes.push(grupos.slice(k, k + RITUAL_LOTE));
+  const intervalo = (RITUAL_SEGUNDOS * 1000) / Math.max(1, lotes.length - 1);
   let llegados = 0;
-  let ultimoFlash = -Infinity, ultimoSonido = -Infinity, ultimoPulso = -Infinity;
-  grupos.forEach((grupo, gi) => {
-    const t0 = gi * intervalo;
+  let ultimoSonido = -Infinity;
+  lotes.forEach((lote, li) => {
+    const t0 = li * intervalo;
+    let flashDado = false;
     setTimeout(() => {
       if (gen !== generacionGalaxia) return;
-      const ahoraP = performance.now();
-      if (ahoraP - ultimoPulso >= RITUAL_PULSO_MIN_MS) { subPulsoIngreso(); ultimoPulso = ahoraP; }
-      llegados++;
+      subPulsoIngreso();
+      llegados += lote.length;
       document.getElementById('n-respuestas').textContent = llegados;
     }, t0);
-    grupo.forEach((p, i) => {
-      const armN = 1 + (contadorIngresos % ARMONICOS_SERIE);
-      contadorIngresos++;
-      setTimeout(() => {
-        if (gen !== generacionGalaxia) return;
-        const nueva = new Pintita(p.id, p.respuesta_id, p.categoria, true);
-        // destino dentro del disco (como en una recarga) y entrada desde
-        // justo fuera del borde visible, en la misma dirección
-        const maxR = getWorldRadius();
-        const ang = Math.random() * Math.PI * 2;
-        const rDest = Math.sqrt(Math.random()) * maxR * 0.75;
-        const rVista = Math.hypot(W, H) / 2 / cam.scale + 60;
-        const rIni = Math.max(rDest + 160, rVista);
-        nueva.ritual = true;
-        nueva.destino = { x: Math.cos(ang) * rDest, y: Math.sin(ang) * rDest };
-        nueva.x = Math.cos(ang) * rIni;
-        nueva.y = Math.sin(ang) * rIni;
-        nueva.vx = -Math.cos(ang) * 0.4;
-        nueva.vy = -Math.sin(ang) * 0.4;
-        pintitas.push(nueva);
-        const ahoraI = performance.now();
-        if (ahoraI - ultimoSonido >= RITUAL_SONIDO_MIN_MS) { swellIngreso(armN); ultimoSonido = ahoraI; }
-        if (ahoraI - ultimoFlash >= RITUAL_FLASH_MIN_MS) { dispararFlash(nueva); ultimoFlash = ahoraI; }
-      }, t0 + 150 + i * 120);
+    lote.forEach((grupo) => {
+      const desfase = Math.random() * 400;  // los relatos del lote no entran en bloque rígido
+      grupo.forEach((p, i) => {
+        const armN = 1 + (contadorIngresos % ARMONICOS_SERIE);
+        contadorIngresos++;
+        setTimeout(() => {
+          if (gen !== generacionGalaxia) return;
+          const nueva = new Pintita(p.id, p.respuesta_id, p.categoria, true);
+          // destino dentro del disco (como en una recarga) y entrada desde
+          // justo fuera del borde visible, en la misma dirección
+          const maxR = getWorldRadius();
+          const ang = Math.random() * Math.PI * 2;
+          const rDest = Math.sqrt(Math.random()) * maxR * 0.75;
+          const rVista = Math.hypot(W, H) / 2 / cam.scale + 60;
+          const rIni = Math.max(rDest + 160, rVista);
+          nueva.ritual = true;
+          nueva.destino = { x: Math.cos(ang) * rDest, y: Math.sin(ang) * rDest };
+          nueva.x = Math.cos(ang) * rIni;
+          nueva.y = Math.sin(ang) * rIni;
+          nueva.vx = -Math.cos(ang) * 0.4;
+          nueva.vy = -Math.sin(ang) * 0.4;
+          pintitas.push(nueva);
+          const ahoraI = performance.now();
+          if (ahoraI - ultimoSonido >= RITUAL_SONIDO_MIN_MS) { swellIngreso(armN); ultimoSonido = ahoraI; }
+          if (!flashDado) { dispararFlash(nueva); flashDado = true; }
+        }, t0 + 150 + desfase + i * 120);
+      });
     });
   });
-  const fin = (grupos.length - 1) * intervalo + 150 + 12 * 120 + 6000;
+  const fin = (lotes.length - 1) * intervalo + 150 + 400 + 12 * 120 + 6000;
   setTimeout(() => {
     if (gen !== generacionGalaxia) return;
     ritualEnCurso = false;
@@ -1668,14 +1698,27 @@ function iniciarRitual(data) {
   }, fin);
 }
 
-// Comando oculto: Shift + Alt + N (en Mac, Shift + Option + N).
-// No aparece en la interfaz.
+// Comando oculto, en dos pasos. No aparece en la interfaz.
+//   1. Shift + Alt + N (en Mac, Shift + Option + N): fundido a negro y espera.
+//   2. Espacio o Enter: empieza el reingreso por lotes.
+//   Escape durante la espera: vuelve la galaxia completa, sin ritual.
+// Espacio, Enter y Escape solo se interceptan durante la espera.
 document.addEventListener('keydown', (e) => {
   if (e.shiftKey && e.altKey && e.code === 'KeyN' && !e.repeat) {
     e.preventDefault();
     recomponerGalaxia({ ritual: true });
+    return;
   }
-});
+  if (ritualEspera && !e.repeat) {
+    if (e.code === 'Space' || e.key === 'Enter') {
+      e.preventDefault(); e.stopImmediatePropagation();
+      accionarRitual();
+    } else if (e.key === 'Escape') {
+      e.preventDefault(); e.stopImmediatePropagation();
+      cancelarRitual();
+    }
+  }
+}, true);
 const FLASH_DURACION = 1700;
 
 function dispararFlash(pintita) {
