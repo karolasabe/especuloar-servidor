@@ -884,7 +884,7 @@ class Pintita {
       const ddy = this.destino.y - this.y;
       const dd = Math.sqrt(ddx * ddx + ddy * ddy);
       if (dd > 25 && this.edad < DURACION_INGRESO) {
-        const pullRitual = 0.016 * Math.min(1, dd / 140);
+        const pullRitual = 0.05 * Math.min(1, dd / 220);
         ax += (ddx / dd) * pullRitual;
         ay += (ddy / dd) * pullRitual;
       } else {
@@ -937,7 +937,7 @@ class Pintita {
 
     // Durante el viaje de ingreso la velocidad máxima se limita:
     // trayectoria pausada, protagónica, fácil de seguir con la vista
-    const velMax = (this.esNueva && this.edad < DURACION_INGRESO) ? 0.85 : 1.9;
+    const velMax = this.destino ? 2.6 : ((this.esNueva && this.edad < DURACION_INGRESO) ? 0.85 : 1.9);
     const v2 = this.vx * this.vx + this.vy * this.vy;
     if (v2 > velMax * velMax) {
       const v = Math.sqrt(v2);
@@ -1548,10 +1548,14 @@ let transicionGalaxia = false;
 let ritualEnCurso = false;
 let versionDiccionario = null;
 const esperar = (ms) => new Promise(r => setTimeout(r, ms));
-// ?ritual=SEGUNDOS fija la duración total del reingreso ritual;
-// sin el parámetro, entra un relato cada 1,5 segundos.
-const RITUAL_SEGUNDOS = Number(new URLSearchParams(window.location.search).get('ritual')) || 0;
-const RITUAL_INTERVALO_MS = 1500;
+// ?ritual=SEGUNDOS fija cuánto tarda en empezar a entrar el último relato
+// (por defecto 30). Con ?ritual=1 entran casi todos a la vez.
+const RITUAL_SEGUNDOS = Number(new URLSearchParams(window.location.search).get('ritual')) || 30;
+// Con muchos ingresos casi simultáneos, destellos y sonidos se espacian
+// para no saturar la imagen ni el audio.
+const RITUAL_FLASH_MIN_MS = 350;
+const RITUAL_SONIDO_MIN_MS = 240;
+const RITUAL_PULSO_MIN_MS = 900;
 
 function fundir(hasta, ms) {
   fundido.desde = fundido.valor;
@@ -1583,7 +1587,7 @@ async function recomponerGalaxia({ ritual }) {
   transicionGalaxia = true;
   try {
     const data = await traerTodasLasPintitas();
-    await fundir(1, ritual ? 3500 : 1800);
+    await fundir(1, ritual ? 2000 : 1800);
     vaciarGalaxia();
     for (const p of data) if (p.id > ultimaPintitaId) ultimaPintitaId = p.id;
     if (!ritual) {
@@ -1597,8 +1601,8 @@ async function recomponerGalaxia({ ritual }) {
       for (const p of data) pintitasMap.set(p.id, true);
       document.getElementById('n-respuestas').textContent = '0';
       ritualEnCurso = true;
-      await esperar(1500);
-      await fundir(0, 2500);
+      await esperar(700);
+      await fundir(0, 1300);
       iniciarRitual(data);
     }
   } catch (e) {
@@ -1618,15 +1622,15 @@ function iniciarRitual(data) {
     porRelato.get(p.respuesta_id).push(p);
   }
   const grupos = [...porRelato.values()];
-  const intervalo = RITUAL_SEGUNDOS > 0
-    ? (RITUAL_SEGUNDOS * 1000) / Math.max(1, grupos.length)
-    : RITUAL_INTERVALO_MS;
+  const intervalo = (RITUAL_SEGUNDOS * 1000) / Math.max(1, grupos.length);
   let llegados = 0;
+  let ultimoFlash = -Infinity, ultimoSonido = -Infinity, ultimoPulso = -Infinity;
   grupos.forEach((grupo, gi) => {
     const t0 = gi * intervalo;
     setTimeout(() => {
       if (gen !== generacionGalaxia) return;
-      subPulsoIngreso();
+      const ahoraP = performance.now();
+      if (ahoraP - ultimoPulso >= RITUAL_PULSO_MIN_MS) { subPulsoIngreso(); ultimoPulso = ahoraP; }
       llegados++;
       document.getElementById('n-respuestas').textContent = llegados;
     }, t0);
@@ -1650,12 +1654,13 @@ function iniciarRitual(data) {
         nueva.vx = -Math.cos(ang) * 0.4;
         nueva.vy = -Math.sin(ang) * 0.4;
         pintitas.push(nueva);
-        swellIngreso(armN);
-        dispararFlash(nueva);
-      }, t0 + 400 + i * 350);
+        const ahoraI = performance.now();
+        if (ahoraI - ultimoSonido >= RITUAL_SONIDO_MIN_MS) { swellIngreso(armN); ultimoSonido = ahoraI; }
+        if (ahoraI - ultimoFlash >= RITUAL_FLASH_MIN_MS) { dispararFlash(nueva); ultimoFlash = ahoraI; }
+      }, t0 + 150 + i * 120);
     });
   });
-  const fin = (grupos.length - 1) * intervalo + 400 + 12 * 350;
+  const fin = (grupos.length - 1) * intervalo + 150 + 12 * 120 + 6000;
   setTimeout(() => {
     if (gen !== generacionGalaxia) return;
     ritualEnCurso = false;
