@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Espéculo(ar) - imagen</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; cursor: none; }
+  .capa {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0; transition: opacity var(--fundido, 4s) ease-in-out;
+  }
+  .capa.visible { opacity: 1; }
+  .capa img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
+  body.cubrir .capa img { width: 100%; height: 100%; max-width: none; max-height: none; object-fit: cover; }
+  body.movimiento .capa.visible img { animation: deriva var(--ciclo, 40s) linear forwards; }
+  @keyframes deriva { from { transform: scale(1); } to { transform: scale(1.05); } }
+  #pie {
+    position: absolute; left: 28px; bottom: 24px; display: flex; gap: 9px;
+    opacity: 0; transition: opacity 2s ease-in-out;
+  }
+  #pie.visible { opacity: 0.85; }
+  .punto { width: 10px; height: 10px; border-radius: 50%; }
+  #estado {
+    position: absolute; right: 14px; bottom: 10px; display: none;
+    font: 12px/1.4 ui-monospace, Menlo, monospace; color: #666;
+  }
+  body.con-estado #estado { display: block; }
+</style>
+</head>
+<body>
+<div class="capa" id="capa0"><img alt=""></div>
+<div class="capa" id="capa1"><img alt=""></div>
+<div id="pie"></div>
+<div id="estado"></div>
+<script>
+// ============================================================
+// Monitor de imágenes de Espéculo(ar)
+// ============================================================
+// Muestra en ciclo lento las imágenes generadas a partir de los relatos.
+// Cuando llega un relato nuevo y su imagen queda lista, interrumpe el
+// ciclo y la muestra durante más tiempo. No requiere interacción.
+//
+// Parámetros de la dirección (todos opcionales):
+//   ?ciclo=40      segundos por imagen en el ciclo
+//   ?nueva=180     segundos que se muestra una imagen recién llegada
+//   ?fundido=4     segundos del fundido entre imágenes
+//   ?sondeo=10     cada cuántos segundos consulta al servidor
+//   ?ajuste=cubrir llena la pantalla recortando (por defecto, imagen completa)
+//   ?movimiento=1  acercamiento lento durante cada imagen
+//   ?pie=1         puntos con los colores de las categorías del relato
+//   ?estado=1      línea de estado abajo a la derecha (para el montaje)
+//   ?recarga=12    horas entre recargas preventivas de la página
+//   ?servidor=URL  otro servidor (pruebas)
+
+const RENDER_API = 'https://especuloar-servidor.onrender.com';
+const parametros = new URLSearchParams(location.search);
+const _host = location.hostname;
+const _esRedLocal =
+  ['localhost', '127.0.0.1'].includes(_host) ||
+  /^192\.168\./.test(_host) || /^10\./.test(_host) ||
+  /^172\.(1[6-9]|2\d|3[01])\./.test(_host);
+const API_BASE = parametros.get('servidor') ||
+  ((_esRedLocal && location.protocol.startsWith('http')) ? location.origin
+    : (location.protocol === 'file:' ? 'http://127.0.0.1:5000' : RENDER_API));
+
+function numero(nombre, defecto) {
+  const v = parseFloat(parametros.get(nombre));
+  return Number.isFinite(v) && v > 0 ? v : defecto;
+}
+const CICLO_MS = numero('ciclo', 40) * 1000;
+const NUEVA_MS = numero('nueva', 180) * 1000;
+const FUNDIDO_MS = numero('fundido', 4) * 1000;
+const SONDEO_MS = numero('sondeo', 10) * 1000;
+const RECARGA_MS = numero('recarga', 12) * 3600 * 1000;
+
+document.documentElement.style.setProperty('--fundido', FUNDIDO_MS + 'ms');
+document.documentElement.style.setProperty('--ciclo', (CICLO_MS + FUNDIDO_MS) + 'ms');
+if (parametros.get('ajuste') === 'cubrir') document.body.classList.add('cubrir');
+if (parametros.get('movimiento') === '1') document.body.classList.add('movimiento');
+if (parametros.get('estado') === '1') document.body.classList.add('con-estado');
+const CON_PIE = parametros.get('pie') === '1';
+
+// ---------- estado ----------
+const imagenes = new Map();   // id -> {id, url, colores, reciente}
+let orden = [];               // ids del ciclo, barajados
+let posicion = 0;
+const colaNuevas = [];        // ids recién llegados, en orden de llegada
+const vistos = new Set();     // ids que ya conocía esta página
+let primeraCarga = true;
+let actual = null;
+let mostrandoNueva = false;
+let temporizador = null;
+let capaActiva = 0;
+let fallosSeguidos = 0;
+let sinConexionDesde = null;
+let pendientesServidor = 0;
+const cargadaEn = Date.now();
+
+const capas = [document.getElementById('capa0'), document.getElementById('capa1')];
+const pie = document.getElementById('pie');
+const lineaEstado = document.getElementById('estado');
+
+function barajar(lista) {
+  const a = lista.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function rearmarOrden() {
+  orden = barajar([...imagenes.keys()]);
+  // que la vuelta nueva no empiece con la imagen que está en pantalla
+  if (orden.length > 1 && orden[0] === actual) orden.push(orden.shift());
+  posicion = 0;
+}
+
+// ---------- servidor ----------
+async function sondear() {
+  try {
+    const res = await fetch(`${API_BASE}/imagenes`, { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const datos = await res.json();
+    sinConexionDesde = null;
+    pendientesServidor = (datos.pendientes || 0) + (datos.generando || 0);
+    const presentes = new Set();
+    for (const img of datos.imagenes || []) {
+      presentes.add(img.id);
+      // si la imagen se regeneró, la url cambia y la próxima vez se ve la nueva
+      imagenes.set(img.id, img);
+      if (!vistos.has(img.id)) {
+        vistos.add(img.id);
+        // se suma al ciclo en un lugar al azar de lo que falta de la vuelta
+        const lugar = posicion + Math.floor(Math.random() * (orden.length - posicion + 1));
+        orden.splice(lugar, 0, img.id);
+        if (!primeraCarga && img.reciente) colaNuevas.push(img.id);
+      }
+    }
+    // imágenes ocultadas o borradas desde la administración
+    let salioLaActual = false;
+    for (const id of [...imagenes.keys()]) {
+      if (!presentes.has(id)) {
+        imagenes.delete(id);
+        orden = orden.filter(x => x !== id);
+        const k = colaNuevas.indexOf(id);
+        if (k >= 0) colaNuevas.splice(k, 1);
+        if (id === actual) salioLaActual = true;
+      }
+    }
+    if (posicion > orden.length) posicion = orden.length;
+    const habiaVacio = primeraCarga || actual === null;
+    primeraCarga = false;
+    if (salioLaActual) {
+      apagar();
+      siguiente();
+    } else if (colaNuevas.length && !mostrandoNueva) {
+      siguiente();            // un relato recién llegado interrumpe el ciclo
+    } else if (habiaVacio && imagenes.size && !temporizador) {
+      siguiente();
+    }
+  } catch (e) {
+    if (!sinConexionDesde) sinConexionDesde = Date.now();
+  }
+  pintarEstado();
+}
+
+// ---------- pantalla ----------
+function cargar(url) {
+  return new Promise((resolver, rechazar) => {
+    const img = new Image();
+    img.onload = () => (img.decode ? img.decode().catch(() => {}) : Promise.resolve())
+      .then(() => resolver(img.src));
+    img.onerror = () => rechazar(new Error('no cargó ' + url));
+    img.src = url;
+  });
+}
+
+function programar(ms) {
+  clearTimeout(temporizador);
+  temporizador = setTimeout(siguiente, ms);
+}
+
+function elegir() {
+  if (colaNuevas.length) return { id: colaNuevas.shift(), nueva: true };
+  if (!orden.length) return null;
+  if (posicion >= orden.length) rearmarOrden();
+  return { id: orden[posicion++], nueva: false };
+}
+
+let turno = 0;   // descarta cargas que quedaron atrás por un cambio posterior
+
+async function siguiente() {
+  clearTimeout(temporizador);
+  temporizador = null;
+  const mio = ++turno;
+  const eleccion = elegir();
+  if (!eleccion) { mostrandoNueva = false; return; }
+  const datos = imagenes.get(eleccion.id);
+  if (!datos) { programar(50); return; }
+  try {
+    const src = await cargar(API_BASE + datos.url);
+    if (mio !== turno) {
+      if (eleccion.nueva) colaNuevas.unshift(eleccion.id);
+      return;
+    }
+    fallosSeguidos = 0;
+    const entrante = capas[1 - capaActiva];
+    const saliente = capas[capaActiva];
+    const imgEntrante = entrante.querySelector('img');
+    imgEntrante.src = src;
+    // reinicia la animación de movimiento
+    imgEntrante.style.animation = 'none'; void imgEntrante.offsetWidth; imgEntrante.style.animation = '';
+    entrante.classList.add('visible');
+    saliente.classList.remove('visible');
+    capaActiva = 1 - capaActiva;
+    actual = eleccion.id;
+    mostrandoNueva = eleccion.nueva;
+    pintarPie(datos);
+    programar(eleccion.nueva ? NUEVA_MS : CICLO_MS);
+  } catch (e) {
+    if (mio !== turno) return;
+    fallosSeguidos++;
+    // si nada carga (servidor caído), espera más antes de volver a intentar
+    programar(fallosSeguidos > Math.max(3, imagenes.size) ? 30000 : 1500);
+  }
+  pintarEstado();
+}
+
+function apagar() {
+  capas.forEach(c => c.classList.remove('visible'));
+  pie.classList.remove('visible');
+  actual = null;
+  mostrandoNueva = false;
+}
+
+function pintarPie(datos) {
+  if (!CON_PIE) return;
+  pie.classList.remove('visible');
+  setTimeout(() => {
+    pie.innerHTML = '';
+    for (const color of datos.colores || []) {
+      const p = document.createElement('div');
+      p.className = 'punto';
+      p.style.background = color;
+      pie.appendChild(p);
+    }
+    pie.classList.add('visible');
+  }, FUNDIDO_MS / 2);
+}
+
+function pintarEstado() {
+  if (!document.body.classList.contains('con-estado')) return;
+  const partes = [`${imagenes.size} imágenes`];
+  if (pendientesServidor) partes.push(`${pendientesServidor} en cola`);
+  if (mostrandoNueva) partes.push('nueva');
+  if (sinConexionDesde) partes.push(`sin conexión hace ${Math.round((Date.now() - sinConexionDesde) / 1000)} s`);
+  lineaEstado.textContent = partes.join(' / ');
+}
+
+// ---------- recarga preventiva ----------
+// Cada cierto tiempo se recarga la página para liberar memoria, pero solo
+// si el sitio responde: recargar sin red dejaría una página de error fija.
+setInterval(async () => {
+  if (Date.now() - cargadaEn < RECARGA_MS || mostrandoNueva) return;
+  try {
+    const r = await fetch(location.href, { cache: 'no-store' });
+    if (r.ok) location.reload();
+  } catch (e) { /* sin red: se intenta en la próxima vuelta */ }
+}, 60000);
+
+sondear();
+setInterval(sondear, SONDEO_MS);
+</script>
+</body>
+</html>
