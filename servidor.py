@@ -2181,7 +2181,38 @@ def generar_prompt(conceptos):
 
 
 # ---------- llamadas a Replicate ----------
+# Replicate restringe a 6 solicitudes por minuto las cuentas con poco
+# crédito o sin medio de pago registrado. El generador se mantiene por debajo.
+REPLICATE_MAX_POR_MINUTO = int(os.environ.get('REPLICATE_MAX_POR_MINUTO', '5'))
+REPLICATE_SONDEO_SEGUNDOS = 12
+_ventana_replicate = []
+_candado_replicate = threading.Lock()
+
+
+def _esperar_turno_replicate():
+    with _candado_replicate:
+        while True:
+            ahora = time.time()
+            while _ventana_replicate and ahora - _ventana_replicate[0] >= 60:
+                _ventana_replicate.pop(0)
+            if len(_ventana_replicate) < REPLICATE_MAX_POR_MINUTO:
+                _ventana_replicate.append(ahora)
+                return
+            time.sleep(max(0.5, 60 - (ahora - _ventana_replicate[0])))
+
+
+def _segundos_de_espera(detalle, cabecera):
+    """Lee cuánto pide esperar Replicate tras un 429 (cabecera Retry-After
+    o el texto 'resets in ~30s')."""
+    for fuente in (cabecera, str(detalle.get('detail', '')) if isinstance(detalle, dict) else ''):
+        m = re.search(r'(\d+)', fuente or '')
+        if m:
+            return int(m.group(1))
+    return None
+
+
 def _replicate(metodo, ruta, cuerpo=None, espera=None, timeout=75):
+    _esperar_turno_replicate()
     url = ruta if ruta.startswith('http') else REPLICATE_API_BASE + ruta
     cabeceras = {'Authorization': 'Bearer ' + REPLICATE_API_TOKEN,
                  'Content-Type': 'application/json'}
@@ -2197,6 +2228,9 @@ def _replicate(metodo, ruta, cuerpo=None, espera=None, timeout=75):
             detalle = json.loads(e.read() or b'{}')
         except Exception:
             detalle = {}
+        if e.code == 429 and isinstance(detalle, dict):
+            cabecera = e.headers.get('Retry-After') if e.headers else None
+            detalle['_esperar'] = _segundos_de_espera(detalle, cabecera)
         return e.code, detalle
     except Exception as e:
         raise ErrorImagen(f'replicate {type(e).__name__}')
@@ -2316,7 +2350,9 @@ def generar_en_replicate(prompt, semilla):
     if estado == 402:
         raise ErrorCuenta('replicate 402: falta crédito o medio de pago en la cuenta')
     if estado == 429:
-        raise ErrorCuenta('replicate 429: límite de solicitudes, se reintenta en unos minutos', espera=180)
+        segundos = min(max((pred.get('_esperar') or 60) + 5, 30), 600)
+        raise ErrorCuenta(f'replicate 429: límite de solicitudes, se reintenta en {segundos} s',
+                          espera=segundos)
     if estado not in (200, 201, 202):
         raise ErrorImagen(f"replicate HTTP {estado} {str(pred.get('detail', pred))[:200]}")
     # Si la espera de 60 s no alcanzó (arranque en frío), se consulta hasta 10 min.
@@ -2324,12 +2360,15 @@ def generar_en_replicate(prompt, semilla):
     while pred.get('status') not in ('succeeded', 'failed', 'canceled'):
         if time.time() > limite:
             raise ErrorImagen('replicate: la predicción no terminó en 10 minutos')
-        time.sleep(4)
+        time.sleep(REPLICATE_SONDEO_SEGUNDOS)
         _latido()
         url_get = (pred.get('urls') or {}).get('get') or f"/predictions/{pred.get('id')}"
         estado, nueva = _replicate('GET', url_get, timeout=30)
         if estado == 200:
             pred = nueva
+        elif estado == 429:
+            # la predicción sigue corriendo en Replicate: solo se espera más
+            time.sleep(min((nueva.get('_esperar') or 30) + 2, 120))
     if pred.get('status') != 'succeeded':
         error = str(pred.get('error') or pred.get('status'))[:300]
         if 'nsfw' in error.lower():
