@@ -876,7 +876,21 @@ class Pintita {
     // corpus. Viaja sola, pausada, visible, hasta integrarse al flocking.
     // El umbral distCentro > maxR * 0.6 corta la atracción cuando ya
     // llegó a la zona del corpus, evitando que atraviese hasta el centro.
-    if (this.esNueva && this.edad < DURACION_INGRESO && distCentro > maxR * 0.6) {
+    // REINGRESO RITUAL (comando oculto): la galaxia está vacía, así que no
+    // hay corpus que atraiga a la pintita. Viaja hacia un destino propio
+    // dentro del disco, frenando al acercarse, y al llegar se suma al flocking.
+    if (this.destino) {
+      const ddx = this.destino.x - this.x;
+      const ddy = this.destino.y - this.y;
+      const dd = Math.sqrt(ddx * ddx + ddy * ddy);
+      if (dd > 25 && this.edad < DURACION_INGRESO) {
+        const pullRitual = 0.016 * Math.min(1, dd / 140);
+        ax += (ddx / dd) * pullRitual;
+        ay += (ddy / dd) * pullRitual;
+      } else {
+        this.destino = null;
+      }
+    } else if (this.esNueva && !this.ritual && this.edad < DURACION_INGRESO && distCentro > maxR * 0.6) {
       const pullIngreso = 0.0062 * (1 - this.edad / DURACION_INGRESO);
       ax -= (this.x / distCentro) * pullIngreso;
       ay -= (this.y / distCentro) * pullIngreso;
@@ -1504,6 +1518,159 @@ if (new URLSearchParams(window.location.search).get('audio') === 'on') {
 // pantalla. Decae en ~1.7 s con easing cuadrático.
 // ============================================================
 const flashes = [];
+
+// CENTRADO DEL CONJUNTO
+// El flujo orgánico arrastra a toda la galaxia en una misma dirección y,
+// sin corrección, en cerca de un minuto sale del encuadre (la atracción de
+// borde actúa recién a 1,2 veces el radio del mundo). Cada cuadro se
+// descuenta una fracción del desplazamiento del centro de masa: el
+// movimiento interno de las pintitas no cambia, solo deja de derivar el
+// conjunto. La cámara del público (arrastre y zoom) no se toca.
+const CENTRADO_FUERZA = 0.01;
+function centrarGalaxia(dt) {
+  if (pintitas.length === 0) return;
+  let cx = 0, cy = 0;
+  for (const p of pintitas) { cx += p.x; cy += p.y; }
+  cx /= pintitas.length; cy /= pintitas.length;
+  const k = CENTRADO_FUERZA * dt / 16.67;
+  for (const p of pintitas) { p.x -= cx * k; p.y -= cy * k; }
+}
+
+// ============================================================
+// RECOMPOSICIÓN DE LA GALAXIA
+// ============================================================
+// fundido: velo negro sobre el lienzo (la interfaz queda visible).
+// generacionGalaxia: cada vez que se vacía la galaxia sube en 1, y los
+// ingresos programados de una generación anterior se descartan.
+const fundido = { desde: 0, hasta: 0, inicio: 0, dur: 1, valor: 0 };
+let generacionGalaxia = 0;
+let transicionGalaxia = false;
+let ritualEnCurso = false;
+let versionDiccionario = null;
+const esperar = (ms) => new Promise(r => setTimeout(r, ms));
+// ?ritual=SEGUNDOS fija la duración total del reingreso ritual;
+// sin el parámetro, entra un relato cada 1,5 segundos.
+const RITUAL_SEGUNDOS = Number(new URLSearchParams(window.location.search).get('ritual')) || 0;
+const RITUAL_INTERVALO_MS = 1500;
+
+function fundir(hasta, ms) {
+  fundido.desde = fundido.valor;
+  fundido.hasta = hasta;
+  fundido.inicio = performance.now();
+  fundido.dur = Math.max(1, ms);
+  return esperar(ms);
+}
+
+function vaciarGalaxia() {
+  generacionGalaxia++;
+  pintitas.length = 0;
+  pintitasMap.clear();
+  flashes.length = 0;
+}
+
+async function traerTodasLasPintitas() {
+  const res = await fetch(`${API_BASE}/pintitas_recientes?n=10000`);
+  if (!res.ok) throw new Error('pintitas ' + res.status);
+  const data = await res.json();
+  data.reverse();  // del relato más antiguo al más nuevo
+  return data;
+}
+
+// ritual = false: fundido, la galaxia se rearma completa y vuelve (cambio de diccionario).
+// ritual = true: fundido, negro, y los relatos reingresan uno a uno (comando oculto).
+async function recomponerGalaxia({ ritual }) {
+  if (transicionGalaxia || ritualEnCurso) return;
+  transicionGalaxia = true;
+  try {
+    const data = await traerTodasLasPintitas();
+    await fundir(1, ritual ? 3500 : 1800);
+    vaciarGalaxia();
+    for (const p of data) if (p.id > ultimaPintitaId) ultimaPintitaId = p.id;
+    if (!ritual) {
+      for (const p of data) {
+        pintitas.push(new Pintita(p.id, p.respuesta_id, p.categoria, false));
+        pintitasMap.set(p.id, true);
+      }
+      await fundir(0, 2200);
+    } else {
+      // se registran ya, para que el sondeo de relatos nuevos no las duplique
+      for (const p of data) pintitasMap.set(p.id, true);
+      document.getElementById('n-respuestas').textContent = '0';
+      ritualEnCurso = true;
+      await esperar(1500);
+      await fundir(0, 2500);
+      iniciarRitual(data);
+    }
+  } catch (e) {
+    console.error(e);
+    ritualEnCurso = false;
+    await fundir(0, 800);
+  } finally {
+    transicionGalaxia = false;
+  }
+}
+
+function iniciarRitual(data) {
+  const gen = generacionGalaxia;
+  const porRelato = new Map();
+  for (const p of data) {
+    if (!porRelato.has(p.respuesta_id)) porRelato.set(p.respuesta_id, []);
+    porRelato.get(p.respuesta_id).push(p);
+  }
+  const grupos = [...porRelato.values()];
+  const intervalo = RITUAL_SEGUNDOS > 0
+    ? (RITUAL_SEGUNDOS * 1000) / Math.max(1, grupos.length)
+    : RITUAL_INTERVALO_MS;
+  let llegados = 0;
+  grupos.forEach((grupo, gi) => {
+    const t0 = gi * intervalo;
+    setTimeout(() => {
+      if (gen !== generacionGalaxia) return;
+      subPulsoIngreso();
+      llegados++;
+      document.getElementById('n-respuestas').textContent = llegados;
+    }, t0);
+    grupo.forEach((p, i) => {
+      const armN = 1 + (contadorIngresos % ARMONICOS_SERIE);
+      contadorIngresos++;
+      setTimeout(() => {
+        if (gen !== generacionGalaxia) return;
+        const nueva = new Pintita(p.id, p.respuesta_id, p.categoria, true);
+        // destino dentro del disco (como en una recarga) y entrada desde
+        // justo fuera del borde visible, en la misma dirección
+        const maxR = getWorldRadius();
+        const ang = Math.random() * Math.PI * 2;
+        const rDest = Math.sqrt(Math.random()) * maxR * 0.75;
+        const rVista = Math.hypot(W, H) / 2 / cam.scale + 60;
+        const rIni = Math.max(rDest + 160, rVista);
+        nueva.ritual = true;
+        nueva.destino = { x: Math.cos(ang) * rDest, y: Math.sin(ang) * rDest };
+        nueva.x = Math.cos(ang) * rIni;
+        nueva.y = Math.sin(ang) * rIni;
+        nueva.vx = -Math.cos(ang) * 0.4;
+        nueva.vy = -Math.sin(ang) * 0.4;
+        pintitas.push(nueva);
+        swellIngreso(armN);
+        dispararFlash(nueva);
+      }, t0 + 400 + i * 350);
+    });
+  });
+  const fin = (grupos.length - 1) * intervalo + 400 + 12 * 350;
+  setTimeout(() => {
+    if (gen !== generacionGalaxia) return;
+    ritualEnCurso = false;
+    actualizarEstado();
+  }, fin);
+}
+
+// Comando oculto: Shift + Alt + N (en Mac, Shift + Option + N).
+// No aparece en la interfaz.
+document.addEventListener('keydown', (e) => {
+  if (e.shiftKey && e.altKey && e.code === 'KeyN' && !e.repeat) {
+    e.preventDefault();
+    recomponerGalaxia({ ritual: true });
+  }
+});
 const FLASH_DURACION = 1700;
 
 function dispararFlash(pintita) {
@@ -1544,6 +1711,7 @@ function render() {
     const vecinos = getVecinos(p.x, p.y);
     p.actualizar(dt, hoverWorldX, hoverWorldY, mouseVel, vecinos, isDragging, gesto);
   }
+  centrarGalaxia(dt);
 
   ctx.globalCompositeOperation = 'source-over';
   ctx.clearRect(0, 0, W, H);
@@ -1689,6 +1857,16 @@ function render() {
       ctx.fillRect(0, 0, W, H);
     }
     ctx.globalCompositeOperation = 'source-over';
+  }
+
+  // CAPA FINAL: FUNDIDO A NEGRO (comando oculto y recomposiciones)
+  const tF = Math.min(1, (ahora - fundido.inicio) / fundido.dur);
+  fundido.valor = fundido.desde + (fundido.hasta - fundido.desde) * (tF * tF * (3 - 2 * tF));
+  if (fundido.valor > 0.001) {
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = `rgba(0,0,0,${fundido.valor})`;
+    ctx.fillRect(0, 0, W, H);
   }
 
   requestAnimationFrame(render);
@@ -2166,6 +2344,7 @@ async function consultarNuevas() {
         porRespuesta.get(p.respuesta_id).push(p);
       }
     }
+    const gen = generacionGalaxia;
     for (const [respId, grupo] of porRespuesta) {
       const delayBase = Math.random() * 1200;
       // Golpe físico grave: anuncia la llegada del relato
@@ -2177,6 +2356,7 @@ async function consultarNuevas() {
         contadorIngresos++;
         const delay = delayBase + 400 + i * 350;
         setTimeout(() => {
+          if (gen !== generacionGalaxia) return;
           const nueva = new Pintita(p.id, p.respuesta_id, p.categoria, true);
           pintitas.push(nueva);
           pintitasMap.set(p.id, true);
@@ -2196,7 +2376,17 @@ async function actualizarEstado() {
     const data = await res.json();
     totalRelatos = data.total_respuestas || totalRelatos;
     if (data.pintitas?.length) actualizarCategoriaAudio(data.pintitas[0].categoria);
-    document.getElementById('n-respuestas').textContent = data.total_respuestas;
+    if (!ritualEnCurso) document.getElementById('n-respuestas').textContent = data.total_respuestas;
+    // Si el servidor reclasificó los relatos (cambió el diccionario),
+    // la galaxia se rearma sola, sin recargar la página ni perder el audio.
+    if (data.version_diccionario) {
+      if (versionDiccionario === null) {
+        versionDiccionario = data.version_diccionario;
+      } else if (data.version_diccionario !== versionDiccionario && !transicionGalaxia && !ritualEnCurso) {
+        versionDiccionario = data.version_diccionario;
+        recomponerGalaxia({ ritual: false });
+      }
+    }
     document.getElementById('estado-dot').classList.add('vivo');
     document.getElementById('estado-texto').textContent = 'corpus activo';
   } catch(e) { marcarSinConexion(); }

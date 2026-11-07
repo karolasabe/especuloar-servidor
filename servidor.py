@@ -1551,6 +1551,12 @@ def init_db():
         intensidad REAL,
         timestamp TEXT
     )''')
+    # Configuración persistente (por ahora, la versión del diccionario con
+    # la que están clasificados los relatos guardados).
+    c.execute('''CREATE TABLE IF NOT EXISTS configuracion (
+        clave TEXT PRIMARY KEY,
+        valor TEXT
+    )''')
     # Caché de traducciones: una fila por relato e idioma de destino.
     c.execute('''CREATE TABLE IF NOT EXISTS traducciones (
         id SERIAL PRIMARY KEY,
@@ -1661,6 +1667,89 @@ def detectar_idioma(texto):
     score_es = sum(1 for p in palabras_es if f' {p} ' in f' {texto.lower()} ')
     score_en = sum(1 for p in palabras_en if f' {p} ' in f' {texto.lower()} ')
     return 'es' if score_es >= score_en else 'en'
+
+
+# ============================================================
+# RECLASIFICACIÓN AUTOMÁTICA
+# ============================================================
+# Cada relato se clasifica al llegar. Si el diccionario cambia, los relatos
+# guardados conservarían las categorías antiguas. Al arrancar, el servidor
+# calcula una huella del diccionario y de las reglas de ampliación; si no
+# coincide con la guardada en la base, reclasifica todos los relatos.
+# Las pintitas cuya categoría se mantiene conservan su id (solo cambia la
+# intensidad); se borran las que sobran y se agregan las nuevas.
+# Si se cambia el código de analizar_relato sin tocar el diccionario,
+# subir CLASIFICADOR_VERSION para forzar la reclasificación.
+CLASIFICADOR_VERSION = 1
+
+def _huella_diccionario():
+    material = {
+        'v': CLASIFICADOR_VERSION,
+        'categorias': {k: sorted(v['palabras']) for k, v in CATEGORIAS.items()},
+        'raiz_minima': RAIZ_MINIMA,
+        'flexion': _FLEXION,
+        'derivacion': _DERIVACION,
+        'genero_fijo': sorted(CATEGORIAS_GENERO_FIJO),
+        'emergentes': INTENSIDAD_EMERGENTES,
+    }
+    datos = json.dumps(material, sort_keys=True, ensure_ascii=False).encode('utf-8')
+    return hashlib.sha256(datos).hexdigest()[:16]
+
+VERSION_DICCIONARIO = _huella_diccionario()
+
+def reclasificar_si_cambio_diccionario():
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        # un solo proceso reclasifica a la vez (por ejemplo, durante un despliegue)
+        c.execute('SELECT pg_advisory_xact_lock(4207)')
+        c.execute("SELECT valor FROM configuracion WHERE clave = 'version_diccionario'")
+        fila = c.fetchone()
+        if fila and fila[0] == VERSION_DICCIONARIO:
+            conn.rollback()
+            return None
+        c.execute('SELECT id, relato FROM respuestas')
+        relatos = c.fetchall()
+        c.execute('SELECT id, respuesta_id, categoria FROM pintitas')
+        por_relato = {}
+        for pid, rid, cat in c.fetchall():
+            por_relato.setdefault(rid, {}).setdefault(cat, []).append(pid)
+        agregadas = borradas = 0
+        ahora = datetime.now().isoformat()
+        for rid, relato in relatos:
+            nuevas = analizar_relato(relato or '')
+            actuales = por_relato.get(rid, {})
+            for cat, ids in actuales.items():
+                if cat not in nuevas:
+                    c.execute('DELETE FROM pintitas WHERE id = ANY(%s)', (ids,))
+                    borradas += len(ids)
+                else:
+                    c.execute('UPDATE pintitas SET intensidad = %s WHERE id = %s', (nuevas[cat], ids[0]))
+                    if len(ids) > 1:
+                        c.execute('DELETE FROM pintitas WHERE id = ANY(%s)', (ids[1:],))
+                        borradas += len(ids) - 1
+            for cat, intensidad in nuevas.items():
+                if cat not in actuales:
+                    c.execute('INSERT INTO pintitas (respuesta_id, categoria, intensidad, timestamp) '
+                              'VALUES (%s,%s,%s,%s)', (rid, cat, intensidad, ahora))
+                    agregadas += 1
+            c.execute('UPDATE respuestas SET categorias_activadas = %s, intensidades = %s WHERE id = %s',
+                      (json.dumps(list(nuevas.keys())), json.dumps(nuevas), rid))
+        c.execute("INSERT INTO configuracion (clave, valor) VALUES ('version_diccionario', %s) "
+                  "ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor", (VERSION_DICCIONARIO,))
+        conn.commit()
+        log.warning('reclasificacion: %s relatos, %s pintitas agregadas, %s borradas (diccionario %s)',
+                    len(relatos), agregadas, borradas, VERSION_DICCIONARIO)
+        return {'relatos': len(relatos), 'agregadas': agregadas, 'borradas': borradas}
+    except Exception:
+        conn.rollback()
+        log.exception('reclasificacion: fallo; los relatos conservan su clasificación anterior')
+        return None
+    finally:
+        conn.close()
+
+with app.app_context():
+    reclasificar_si_cambio_diccionario()
 
 # ============================================================
 # GUARDAR
@@ -1827,7 +1916,8 @@ def estado():
 
     return jsonify({
         'total_respuestas': n_respuestas,
-        'pintitas': datos_pintitas
+        'pintitas': datos_pintitas,
+        'version_diccionario': VERSION_DICCIONARIO
     })
 
 @app.route('/pintitas_recientes', methods=['GET'])
