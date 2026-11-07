@@ -61,7 +61,15 @@ TALLY_SIGNING_SECRET = os.environ.get('TALLY_SIGNING_SECRET', '')
 # El generador corre en un hilo del propio servidor y solo arranca si
 # existen ANTHROPIC_API_KEY y REPLICATE_API_TOKEN. Con IMAGENES_ACTIVAS=0
 # queda apagado aunque las claves existan.
-REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN', '')
+def _limpiar_secreto(valor):
+    """Quita espacios, saltos de línea, comillas o un 'Bearer ' pegado por
+    error al copiar el token en Render."""
+    valor = (valor or '').strip().strip('"\'').strip()
+    if valor.lower().startswith('bearer '):
+        valor = valor[7:].strip()
+    return valor
+
+REPLICATE_API_TOKEN = _limpiar_secreto(os.environ.get('REPLICATE_API_TOKEN', ''))
 REPLICATE_API_BASE = os.environ.get('REPLICATE_API_BASE', 'https://api.replicate.com/v1')
 IMAGENES_ACTIVAS = os.environ.get('IMAGENES_ACTIVAS', '1').lower() not in ('0', 'false', 'no')
 # Stable Diffusion 1.5 (checkpoint runwayml/stable-diffusion-v1-5), versión
@@ -1976,6 +1984,74 @@ class ErrorImagen(Exception):
     pass
 
 
+class ErrorCuenta(ErrorImagen):
+    """Falla de la cuenta (token, crédito, límite de uso), no del relato:
+    detiene la cola entera un rato en vez de gastar intentos en cada relato."""
+    def __init__(self, mensaje, espera=900):
+        super().__init__(mensaje)
+        self.espera = espera
+
+
+# Contador del tope diario: solo predicciones que Replicate aceptó (las que cobra).
+SERVICIO_REPLICATE = 'replicate_creadas'
+
+
+def formato_token_replicate():
+    """Revisa la forma del token sin revelarlo: Replicate usa 40 caracteres
+    que empiezan con r8_."""
+    if not REPLICATE_API_TOKEN:
+        return 'falta'
+    if not REPLICATE_API_TOKEN.startswith('r8_'):
+        return 'no empieza con r8_'
+    if len(REPLICATE_API_TOKEN) != 40:
+        return f'tiene {len(REPLICATE_API_TOKEN)} caracteres (se esperaban 40)'
+    return 'ok'
+
+
+def _latido():
+    """Marca en la base que el generador sigue vivo (sirve aunque el hilo
+    corra en otro proceso que el que responde /imagenes/estado)."""
+    try:
+        conn = get_conn()
+        c = conn.cursor()
+        _escribir_config(c, 'imagenes_latido', _ahora().isoformat())
+        conn.commit()
+        conn.close()
+    except Exception:
+        log.exception('imagenes: no se pudo registrar el latido')
+
+
+def _bloquear(mensaje, espera):
+    conn = get_conn()
+    c = conn.cursor()
+    hasta = datetime.fromtimestamp(_ahora().timestamp() + espera).isoformat()
+    _escribir_config(c, 'imagenes_bloqueo', json.dumps({'mensaje': mensaje, 'hasta': hasta},
+                                                       ensure_ascii=False))
+    conn.commit()
+    conn.close()
+
+
+def _desbloquear():
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("DELETE FROM configuracion WHERE clave = 'imagenes_bloqueo'")
+    conn.commit()
+    conn.close()
+
+
+def _bloqueo_vigente(c):
+    valor = _leer_config(c, 'imagenes_bloqueo')
+    if not valor:
+        return None
+    try:
+        datos = json.loads(valor)
+    except ValueError:
+        return None
+    if datos.get('hasta', '') > _ahora().isoformat():
+        return datos
+    return None
+
+
 def imagenes_habilitadas():
     return bool(IMAGENES_ACTIVAS and ANTHROPIC_API_KEY and REPLICATE_API_TOKEN)
 
@@ -2041,6 +2117,12 @@ def _claude(sistema, contenido, max_tokens=1024):
             detalle = e.read().decode('utf-8', 'replace')[:300]
         except Exception:
             detalle = ''
+        if e.code in (401, 403):
+            raise ErrorCuenta(f'anthropic {e.code}: clave de API inválida o sin permiso')
+        if e.code == 429:
+            raise ErrorCuenta('anthropic 429: límite de uso, se reintenta en unos minutos', espera=180)
+        if 'credit balance' in detalle.lower():
+            raise ErrorCuenta('anthropic: sin crédito en la cuenta de la Console')
         raise ErrorImagen(f'anthropic HTTP {e.code} {detalle}')
     except Exception as e:
         raise ErrorImagen(f'anthropic {type(e).__name__}')
@@ -2214,9 +2296,10 @@ def generar_en_replicate(prompt, semilla):
     # Si el modelo rechaza una entrada opcional (422), se reintenta sin ella.
     opcionales = ['scheduler', 'negative_prompt']
     while True:
-        _sumar_consumo('replicate')
         estado, pred = _replicate('POST', '/predictions',
                                   {'version': version, 'input': entrada}, espera=60)
+        if estado in (200, 201, 202):
+            _sumar_consumo(SERVICIO_REPLICATE)
         if estado == 422 and any(k in entrada for k in opcionales):
             # Primero la entrada que el mensaje de error nombra; si no nombra
             # ninguna, en el orden de la lista.
@@ -2228,10 +2311,12 @@ def generar_en_replicate(prompt, semilla):
             del entrada[quitar]
             continue
         break
+    if estado in (401, 403):
+        raise ErrorCuenta(f'replicate {estado}: el token no es válido; revisar REPLICATE_API_TOKEN en Render')
     if estado == 402:
-        raise ErrorImagen('replicate 402: falta saldo o medio de pago en la cuenta')
+        raise ErrorCuenta('replicate 402: falta crédito o medio de pago en la cuenta')
     if estado == 429:
-        raise ErrorImagen('replicate 429: demasiadas solicitudes')
+        raise ErrorCuenta('replicate 429: límite de solicitudes, se reintenta en unos minutos', espera=180)
     if estado not in (200, 201, 202):
         raise ErrorImagen(f"replicate HTTP {estado} {str(pred.get('detail', pred))[:200]}")
     # Si la espera de 60 s no alcanzó (arranque en frío), se consulta hasta 10 min.
@@ -2240,6 +2325,7 @@ def generar_en_replicate(prompt, semilla):
         if time.time() > limite:
             raise ErrorImagen('replicate: la predicción no terminó en 10 minutos')
         time.sleep(4)
+        _latido()
         url_get = (pred.get('urls') or {}).get('get') or f"/predictions/{pred.get('id')}"
         estado, nueva = _replicate('GET', url_get, timeout=30)
         if estado == 200:
@@ -2312,7 +2398,9 @@ def reclamar_imagen():
         c = conn.cursor()
         if _imagenes_en_pausa(c):
             return None
-        if _consumo_hoy(c, 'replicate') >= IMAGEN_MAX_DIA:
+        if _bloqueo_vigente(c):
+            return 'bloqueo'
+        if _consumo_hoy(c, SERVICIO_REPLICATE) >= IMAGEN_MAX_DIA:
             return 'cupo'
         ahora = _ahora().isoformat()
         c.execute('''UPDATE imagenes SET estado = 'generando', inicio = %s, intentos = intentos + 1
@@ -2386,7 +2474,19 @@ def procesar_imagen(trabajo):
             parametros=json.dumps(resultado['parametros'], ensure_ascii=False),
             generada=_ahora().isoformat(), error=None, proximo_intento=None)
         log.info('imagenes: relato %s listo (intento %s)', respuesta_id, intentos)
+        _desbloquear()
         return 'lista'
+    except ErrorCuenta as e:
+        # El relato no tiene la culpa: vuelve a la cola sin gastar su intento
+        # y toda la generación espera.
+        log.warning('imagenes: cola detenida %s s: %s', e.espera, e)
+        conn = get_conn()
+        conn.cursor().execute('''UPDATE imagenes SET estado = 'pendiente', error = %s,
+            intentos = GREATEST(intentos - 1, 0) WHERE id = %s''', (str(e)[:500], imagen_id))
+        conn.commit()
+        conn.close()
+        _bloquear(str(e), e.espera)
+        return 'bloqueo'
     except ErrorImagen as e:
         log.warning('imagenes: relato %s, intento %s: %s', respuesta_id, intentos, e)
         _registrar_fallo(imagen_id, intentos, str(e))
@@ -2396,18 +2496,21 @@ def procesar_imagen(trabajo):
 def _bucle_imagenes():
     time.sleep(3)
     ultimo_relleno = 0
+    aviso_cupo = None
     while True:
         try:
+            _latido()
             if time.time() - ultimo_relleno > 300:
                 nuevas = encolar_faltantes()
                 if nuevas:
                     log.info('imagenes: %s relatos encolados', nuevas)
                 ultimo_relleno = time.time()
             trabajo = reclamar_imagen()
-            if trabajo is None or trabajo == 'cupo':
-                if trabajo == 'cupo':
-                    log.warning('imagenes: se alcanzó el tope diario de %s llamadas', IMAGEN_MAX_DIA)
-                _evento_imagenes.wait(60 if trabajo == 'cupo' else 15)
+            if trabajo in (None, 'cupo', 'bloqueo'):
+                if trabajo == 'cupo' and aviso_cupo != _ahora().date():
+                    log.warning('imagenes: se alcanzó el tope diario de %s imágenes', IMAGEN_MAX_DIA)
+                    aviso_cupo = _ahora().date()
+                _evento_imagenes.wait(15 if trabajo is None else 60)
                 _evento_imagenes.clear()
                 continue
             procesar_imagen(trabajo)
@@ -2424,6 +2527,15 @@ def iniciar_generador_imagenes():
         return False
     if _hilo_imagenes and _hilo_imagenes.is_alive():
         return True
+    formato = formato_token_replicate()
+    if formato != 'ok':
+        log.warning('imagenes: REPLICATE_API_TOKEN %s', formato)
+    # Un despliegue nuevo suele traer la corrección (token, crédito): se
+    # levanta el bloqueo anterior para probar de inmediato.
+    try:
+        _desbloquear()
+    except Exception:
+        log.exception('imagenes: no se pudo levantar el bloqueo anterior')
     _hilo_imagenes = threading.Thread(target=_bucle_imagenes, name='generador-imagenes',
                                       daemon=True)
     _hilo_imagenes.start()
@@ -2498,16 +2610,32 @@ def estado_imagenes():
     c.execute("SELECT estado, COUNT(*) FROM imagenes GROUP BY estado")
     conteo = dict(c.fetchall())
     pausa = _imagenes_en_pausa(c)
-    replicate_hoy = _consumo_hoy(c, 'replicate')
+    bloqueo = _bloqueo_vigente(c)
+    replicate_hoy = _consumo_hoy(c, SERVICIO_REPLICATE)
     anthropic_hoy = _consumo_hoy(c, 'anthropic')
+    latido = _leer_config(c, 'imagenes_latido')
+    # Último error registrado (mensajes propios del servidor: códigos HTTP y
+    # explicaciones; no incluyen claves ni texto de los relatos).
+    c.execute('''SELECT respuesta_id, error, inicio FROM imagenes
+        WHERE error IS NOT NULL ORDER BY inicio DESC NULLS LAST LIMIT 1''')
+    fila_error = c.fetchone()
     conn.close()
+    latido_hace = _segundos_desde(latido) if latido else None
     return jsonify({
         'habilitado': imagenes_habilitadas(),
-        'generador_vivo': bool(_hilo_imagenes and _hilo_imagenes.is_alive()),
+        # Vivo si marcó latido en los últimos 3 minutos (una predicción en
+        # frío también marca latido mientras espera).
+        'generador_vivo': latido_hace is not None and latido_hace < 180,
+        'latido_hace_s': latido_hace,
         'en_pausa': pausa,
+        'detenido_por': bloqueo,
+        'token_replicate': formato_token_replicate(),
         'por_estado': conteo,
-        'llamadas_hoy': {'replicate': replicate_hoy, 'anthropic': anthropic_hoy},
-        'tope_diario_replicate': IMAGEN_MAX_DIA,
+        'imagenes_hoy': replicate_hoy,
+        'tope_diario': IMAGEN_MAX_DIA,
+        'llamadas_claude_hoy': anthropic_hoy,
+        'ultimo_error': ({'relato': fila_error[0], 'error': fila_error[1], 'cuando': fila_error[2]}
+                         if fila_error else None),
         'modelo_imagen': IMAGEN_MODELO_REPLICATE,
         'modelo_texto': IMAGEN_MODELO_TEXTO,
     })
