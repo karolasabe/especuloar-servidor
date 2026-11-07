@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Espéculo(ar) - imagen</title>
 <style>
+  /* Droid Sans Mono, alojada en el
+     repositorio. Licencia Apache 2.0: ver LICENCIA_FUENTES_DROID.txt */
+  @font-face { font-family: 'Droid Sans Mono'; src: url('DroidSansMono.woff2') format('woff2'); font-display: swap; }
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; cursor: none; }
   .capa {
     position: absolute; inset: 0;
@@ -27,6 +30,22 @@
     font: 12px/1.4 ui-monospace, Menlo, monospace; color: #666;
   }
   body.con-estado #estado { display: block; }
+  /* contador con el mismo lenguaje que el de voces de la galaxia */
+  #contador {
+    position: absolute; top: 1.8rem; right: 1.8rem; text-align: right;
+    font-family: 'Droid Sans Mono', ui-monospace, monospace; z-index: 2;
+  }
+  body.sin-contador #contador { display: none; }
+  #n-imagenes { font-size: 38px; font-weight: 300; color: #888; line-height: 1; transition: color 1.2s; }
+  #n-imagenes.sube { color: #ddd; transition: color 0.15s; }
+  .n-label { font-size: 9px; color: #444; letter-spacing: 0.2em; margin-top: 3px; }
+  #en-creacion { font-size: 9px; color: #666; letter-spacing: 0.2em; margin-top: 10px; opacity: 0; transition: opacity 1s; }
+  #en-creacion.visible { opacity: 1; }
+  #en-creacion .pulso {
+    display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: #9A8CFF;
+    margin-right: 7px; vertical-align: 1px; animation: latido 1.8s ease-in-out infinite;
+  }
+  @keyframes latido { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
 </style>
 </head>
 <body>
@@ -34,6 +53,11 @@
 <div class="capa" id="capa1"><img alt=""></div>
 <div id="pie"></div>
 <div id="estado"></div>
+<div id="contador">
+  <div id="n-imagenes">-</div>
+  <div class="n-label">IMÁGENES</div>
+  <div id="en-creacion"><span class="pulso"></span><span id="n-creacion">0</span> EN CREACIÓN</div>
+</div>
 <script>
 // ============================================================
 // Monitor de imágenes de Espéculo(ar)
@@ -42,10 +66,14 @@
 // Cuando llega un relato nuevo y su imagen queda lista, interrumpe el
 // ciclo y la muestra durante más tiempo. No requiere interacción.
 //
+// Si llegan muchas juntas (tres o más esperando), cada nueva dura lo mismo
+// que una del ciclo, para que el monitor no se atrase.
+//
 // Parámetros de la dirección (todos opcionales):
-//   ?ciclo=40      segundos por imagen en el ciclo
-//   ?nueva=180     segundos que se muestra una imagen recién llegada
-//   ?fundido=4     segundos del fundido entre imágenes
+//   ?ciclo=15      segundos por imagen en el ciclo
+//   ?nueva=45      segundos que se muestra una imagen recién llegada
+//   ?fundido=2.5   segundos del fundido entre imágenes
+//   ?contador=0    oculta el contador de la esquina
 //   ?sondeo=10     cada cuántos segundos consulta al servidor
 //   ?ajuste=cubrir llena la pantalla recortando (por defecto, imagen completa)
 //   ?movimiento=1  acercamiento lento durante cada imagen
@@ -69,9 +97,9 @@ function numero(nombre, defecto) {
   const v = parseFloat(parametros.get(nombre));
   return Number.isFinite(v) && v > 0 ? v : defecto;
 }
-const CICLO_MS = numero('ciclo', 40) * 1000;
-const NUEVA_MS = numero('nueva', 180) * 1000;
-const FUNDIDO_MS = numero('fundido', 4) * 1000;
+const CICLO_MS = numero('ciclo', 15) * 1000;
+const NUEVA_MS = numero('nueva', 45) * 1000;
+const FUNDIDO_MS = numero('fundido', 2.5) * 1000;
 const SONDEO_MS = numero('sondeo', 10) * 1000;
 const RECARGA_MS = numero('recarga', 12) * 3600 * 1000;
 
@@ -80,6 +108,7 @@ document.documentElement.style.setProperty('--ciclo', (CICLO_MS + FUNDIDO_MS) + 
 if (parametros.get('ajuste') === 'cubrir') document.body.classList.add('cubrir');
 if (parametros.get('movimiento') === '1') document.body.classList.add('movimiento');
 if (parametros.get('estado') === '1') document.body.classList.add('con-estado');
+if (parametros.get('contador') === '0') document.body.classList.add('sin-contador');
 const CON_PIE = parametros.get('pie') === '1';
 
 // ---------- estado ----------
@@ -101,6 +130,22 @@ const cargadaEn = Date.now();
 const capas = [document.getElementById('capa0'), document.getElementById('capa1')];
 const pie = document.getElementById('pie');
 const lineaEstado = document.getElementById('estado');
+const nImagenes = document.getElementById('n-imagenes');
+const enCreacion = document.getElementById('en-creacion');
+const nCreacion = document.getElementById('n-creacion');
+let totalMostrado = null;
+
+function pintarContador() {
+  const total = imagenes.size;
+  if (totalMostrado !== null && total > totalMostrado) {
+    nImagenes.classList.add('sube');
+    setTimeout(() => nImagenes.classList.remove('sube'), 400);
+  }
+  totalMostrado = total;
+  nImagenes.textContent = total;
+  nCreacion.textContent = pendientesServidor;
+  enCreacion.classList.toggle('visible', pendientesServidor > 0);
+}
 
 function barajar(lista) {
   const a = lista.slice();
@@ -164,6 +209,7 @@ async function sondear() {
   } catch (e) {
     if (!sinConexionDesde) sinConexionDesde = Date.now();
   }
+  pintarContador();
   pintarEstado();
 }
 
@@ -219,7 +265,9 @@ async function siguiente() {
     actual = eleccion.id;
     mostrandoNueva = eleccion.nueva;
     pintarPie(datos);
-    programar(eleccion.nueva ? NUEVA_MS : CICLO_MS);
+    // con tres o más nuevas esperando, cada una dura lo que una del ciclo
+    const duracion = eleccion.nueva && colaNuevas.length < 2 ? NUEVA_MS : CICLO_MS;
+    programar(duracion);
   } catch (e) {
     if (mio !== turno) return;
     fallosSeguidos++;

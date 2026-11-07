@@ -5,10 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Espéculo(ar) galaxia</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital@0;1&display=swap');
+  /* Droid Sans Mono (sistema) y Droid Serif (relatos), alojadas en el
+     repositorio. Licencia Apache 2.0: ver LICENCIA_FUENTES_DROID.txt */
+  @font-face { font-family: 'Droid Sans Mono'; src: url('DroidSansMono.woff2') format('woff2'); font-display: swap; }
+  @font-face { font-family: 'Droid Serif'; src: url('DroidSerif.woff2') format('woff2'); font-display: swap; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { width: 100%; height: 100%; overflow: hidden; background: #09050a; }
-  body { font-family: 'Space Mono', monospace; }
+  body { font-family: 'Droid Sans Mono', ui-monospace, monospace; }
   canvas { display: block; width: 100%; height: 100%; touch-action: none; }
 
   #overlay {
@@ -18,7 +21,7 @@
   }
   .header-bar { display: flex; justify-content: space-between; align-items: flex-start; }
   .titulo { font-size: 11px; letter-spacing: 0.2em; color: #555; }
-  .subtitulo { font-size: 10px; letter-spacing: 0.1em; color: #333; margin-top: 5px; font-style: italic; }
+  .subtitulo { font-size: 10px; letter-spacing: 0.1em; color: #333; margin-top: 5px; }
   .contador { text-align: right; }
   .n-respuestas { font-size: 38px; font-weight: 300; color: #888; line-height: 1; }
   .n-label { font-size: 9px; color: #444; letter-spacing: 0.2em; margin-top: 3px; }
@@ -217,12 +220,12 @@
     background: #0a0a0a; border: 0.5px solid #1e1e1e;
     max-width: 600px; width: 100%; padding: 2.5rem;
     max-height: 80vh; overflow-y: auto;
-    color: #ccc; font-family: 'Space Mono', monospace;
+    color: #ccc; font-family: 'Droid Sans Mono', ui-monospace, monospace;
     font-size: 13.5px; line-height: 1.75; position: relative;
   }
   .modal-categorias { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 1.4rem; }
   .modal-cat-chip { font-size: 9.5px; padding: 3px 9px; border-radius: 10px; color: #fff; letter-spacing: 0.04em; }
-  .modal-relato { white-space: pre-wrap; color: #d8d8d8; }
+  .modal-relato { white-space: pre-wrap; color: #d8d8d8; font-family: 'Droid Serif', Georgia, serif; font-size: 1.06em; }
   .modal-cerrar {
     position: absolute; top: 1rem; right: 1.4rem;
     background: transparent; border: none; color: #555;
@@ -234,7 +237,7 @@
     background: none; border: none;
     color: rgba(255,255,255,0.28); font-size: 9px;
     letter-spacing: 0.14em; cursor: pointer;
-    font-family: 'Space Mono', monospace;
+    font-family: 'Droid Sans Mono', ui-monospace, monospace;
     padding: 0; transition: color 0.2s;
   }
   .modal-traducir:hover { color: rgba(255,255,255,0.6); }
@@ -2160,11 +2163,24 @@ let _mostrandoTraduccion = false;
 let _traduciendo = false;
 
 // Las etiquetas de categoría siguen el idioma del texto que se está viendo.
+// Texto oscuro sobre los colores claros (Aromas, Profesional mujer), claro sobre el resto.
+function colorTextoChip(color) {
+  const c = String(color).trim();
+  let rgb = null;
+  const hex = c.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+  const fun = c.match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/i);
+  if (hex) rgb = hex.slice(1, 4).map(v => parseInt(v, 16));
+  else if (fun) rgb = fun.slice(1, 4).map(Number);
+  if (!rgb) return '#fff';
+  const luz = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
+  return luz > 170 ? '#111' : '#fff';
+}
+
 function pintarChipsModal() {
   const idioma = _mostrandoTraduccion ? _idiomaDestino : _idiomaOriginal;
   document.getElementById('modal-cats').innerHTML = _categoriasModal.map(cat => {
     const info = CATEGORIAS[cat] || { color: '#888' };
-    return `<span class="modal-cat-chip" style="background:${info.color}">${nombreCategoria(cat, idioma)}</span>`;
+    return `<span class="modal-cat-chip" style="background:${info.color};color:${colorTextoChip(info.color)}">${nombreCategoria(cat, idioma)}</span>`;
   }).join('');
 }
 
@@ -2529,7 +2545,7 @@ if (MODO_PROYECCION) {
   indicador.style.cssText = `
     position: fixed; bottom: 1.8rem; right: 1.8rem; z-index: 99;
     display: flex; align-items: center; gap: 7px;
-    font-family: 'Space Mono', monospace; font-size: 9px;
+    font-family: 'Droid Sans Mono', ui-monospace, monospace; font-size: 9px;
     letter-spacing: 0.12em; color: #444; pointer-events: none;
   `;
   indicador.innerHTML = `

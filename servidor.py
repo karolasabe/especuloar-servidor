@@ -2617,6 +2617,7 @@ def listar_imagenes():
             'edad_relato_s': edad,
             'reciente': edad is not None and edad < IMAGEN_RECIENTE_SEGUNDOS,
             'colores': [CATEGORIAS.get(k, {}).get('color', '#888') for k in categorias],
+            'categorias': categorias,
         })
     return jsonify({
         'imagenes': imagenes,
@@ -2625,16 +2626,55 @@ def listar_imagenes():
     })
 
 
+_miniaturas = {}
+_MINIATURAS_MAX = 600
+
+
+def _miniatura(imagen_id, generada, datos, mime, ancho):
+    """Reduce la imagen con Pillow y guarda el resultado en memoria (la
+    clave incluye la fecha de generación, así una regeneración no reutiliza
+    la miniatura anterior)."""
+    clave = (imagen_id, generada, ancho)
+    if clave in _miniaturas:
+        return _miniaturas[clave]
+    try:
+        from PIL import Image
+        imagen = Image.open(io.BytesIO(datos)).convert('RGB')
+        if imagen.width > ancho:
+            alto = round(imagen.height * ancho / imagen.width)
+            imagen = imagen.resize((ancho, alto), Image.LANCZOS)
+        salida = io.BytesIO()
+        imagen.save(salida, 'JPEG', quality=85, optimize=True)
+        resultado = (salida.getvalue(), 'image/jpeg')
+    except Exception:
+        return datos, mime
+    if len(_miniaturas) >= _MINIATURAS_MAX:
+        _miniaturas.pop(next(iter(_miniaturas)))
+    _miniaturas[clave] = resultado
+    return resultado
+
+
 @app.route('/imagen/<int:imagen_id>', methods=['GET'])
 def obtener_imagen(imagen_id):
+    """Imagen completa, o reducida con ?ancho=N (entre 96 y 768 px) para
+    la grilla de la galería."""
     conn = get_conn()
     c = conn.cursor()
-    c.execute("SELECT datos, mime FROM imagenes WHERE id = %s AND estado = 'lista'", (imagen_id,))
+    c.execute("SELECT datos, mime, generada FROM imagenes WHERE id = %s AND estado = 'lista'",
+              (imagen_id,))
     fila = c.fetchone()
     conn.close()
     if not fila or fila[0] is None:
         return jsonify({'error': 'no encontrada'}), 404
-    respuesta = app.response_class(bytes(fila[0]), mimetype=fila[1] or 'image/jpeg')
+    datos, mime = bytes(fila[0]), fila[1] or 'image/jpeg'
+    try:
+        ancho = int(request.args.get('ancho', 0))
+    except ValueError:
+        ancho = 0
+    if ancho:
+        ancho = max(96, min(ancho, 768))
+        datos, mime = _miniatura(imagen_id, fila[2] or '', datos, mime, ancho)
+    respuesta = app.response_class(datos, mimetype=mime)
     if request.args.get('v'):
         respuesta.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
     else:
