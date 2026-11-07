@@ -5,130 +5,174 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Espéculo(ar) imágenes</title>
 <style>
-  /* Droid Sans Mono (sistema) y Droid Serif (relatos), alojadas en el
-     repositorio. Licencia Apache 2.0: ver LICENCIA_FUENTES_DROID.txt */
+  /* Droid Sans Mono (sistema) y Droid Serif (relatos y palabras), alojadas
+     en el repositorio. Licencia Apache 2.0: ver LICENCIA_FUENTES_DROID.txt */
   @font-face { font-family: 'Droid Sans Mono'; src: url('DroidSansMono.woff2') format('woff2'); font-display: swap; }
   @font-face { font-family: 'Droid Serif'; src: url('DroidSerif.woff2') format('woff2'); font-display: swap; }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { background: #09050a; color: #ccc; font-family: 'Droid Sans Mono', ui-monospace, monospace; }
 
-  header {
-    position: sticky; top: 0; z-index: 5;
+  :root {
+    --papel: #faf9f6;
+    --tinta: #151515;
+    --gris: #8b8880;
+    --gris-claro: #c9c6bf;
+    --celda: 160px;
+    --cols: 8;
+    --margen: 40px;
+    --mono: 'Droid Sans Mono', ui-monospace, monospace;
+    --serif: 'Droid Serif', Georgia, serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--papel); color: var(--tinta); }
+  body { font-family: var(--mono); font-size: 11px; line-height: 1.45; }
+  button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+  button:focus-visible { outline: 1px dotted var(--tinta); outline-offset: 3px; }
+
+  /* ---------- cabecera ---------- */
+  .cabecera {
     display: flex; justify-content: space-between; align-items: flex-start;
-    padding: 1.8rem 1.8rem 1.4rem; background: rgba(9,5,10,0.94);
+    padding: 30px var(--margen) 26px;
   }
-  .titulo { font-size: 11px; letter-spacing: 0.2em; color: #555; }
-  .contador { text-align: right; }
-  .n-respuestas { font-size: 38px; font-weight: 300; color: #888; line-height: 1; transition: color 1.2s; }
-  .n-respuestas.sube { color: #ddd; transition: color 0.15s; }
-  .n-label { font-size: 9px; color: #444; letter-spacing: 0.2em; margin-top: 3px; }
-  .en-creacion { font-size: 9px; color: #666; letter-spacing: 0.2em; margin-top: 10px; opacity: 0; transition: opacity 1s; }
-  .en-creacion.visible { opacity: 1; }
-  .pulso {
-    display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: #9A8CFF;
-    margin-right: 7px; vertical-align: 1px; animation: latido 1.8s ease-in-out infinite;
-  }
-  @keyframes latido { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+  .cabecera .titulo { font-size: 12px; }
+  .cabecera .mes { color: var(--gris); margin-top: 4px; }
+  .cuenta { text-align: right; }
+  .cuenta .creando { color: var(--gris); }
+  #actualizar { display: none; margin-top: 8px; text-decoration: underline; text-underline-offset: 3px; }
+  #actualizar.visible { display: inline-block; }
 
-  #grilla {
-    display: grid; gap: 4px; padding: 0 1.8rem 3rem;
-    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  /* ---------- lámina: grilla de celdas con puntos en las esquinas ---------- */
+  .lamina {
+    display: grid;
+    grid-template-columns: repeat(var(--cols), var(--celda));
+    grid-auto-rows: var(--celda);
+    width: calc(var(--cols) * var(--celda) + 2px);
+    margin: 0 auto 90px;
+    padding: 1px;
+    background-image: radial-gradient(circle, var(--tinta) 1.15px, transparent 1.6px);
+    background-size: var(--celda) var(--celda);
+    background-origin: content-box;
+    background-position: calc(var(--celda) / -2) calc(var(--celda) / -2);
   }
-  .celda {
-    position: relative; aspect-ratio: 1 / 1; overflow: hidden; cursor: pointer;
-    background: #120d14; border: 0; padding: 0; display: block; width: 100%;
-  }
-  .celda img {
-    display: block; width: 100%; height: 100%; object-fit: cover;
-    opacity: 0; transition: opacity 0.8s, transform 0.6s;
-  }
-  .celda img.cargada { opacity: 1; }
-  .celda:hover img, .celda:focus-visible img { transform: scale(1.035); }
-  .celda:focus-visible { outline: 1px solid #9A8CFF; outline-offset: 2px; }
-  .celda .puntos { position: absolute; left: 8px; bottom: 8px; display: flex; gap: 4px; }
-  .punto { width: 7px; height: 7px; border-radius: 50%; }
-  .celda.nueva { animation: llegada 2.4s ease-out; }
-  @keyframes llegada { from { box-shadow: 0 0 0 2px #9A8CFF; } to { box-shadow: 0 0 0 0 rgba(154,140,255,0); } }
-  #vacio { padding: 4rem 1.8rem; font-size: 11px; letter-spacing: 0.12em; color: #444; display: none; }
+  .pieza { position: relative; min-width: 0; min-height: 0; }
 
-  #modal {
-    position: fixed; inset: 0; z-index: 100;
-    display: none; align-items: center; justify-content: center;
-    background: rgba(3,3,3,0.94); padding: 2rem;
+  /* imagen: un marco dentro de su espacio, con margen y alineación propios */
+  .imagen {
+    display: flex; flex-direction: column; gap: 6px;
+    padding: var(--pad, 10%);
+    align-items: var(--x, flex-start);
+    justify-content: var(--y, flex-start);
   }
-  #modal.activo { display: flex; }
-  .modal-contenido {
-    position: relative; width: 100%; max-width: 1120px; max-height: 88vh;
-    display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
-    background: #0a0a0a; border: 0.5px solid #1e1e1e;
-  }
-  .modal-imagen { background: #000; display: flex; align-items: center; justify-content: center; min-height: 0; }
-  .modal-imagen img { display: block; width: 100%; max-height: 88vh; object-fit: contain; }
-  .modal-texto {
-    padding: 2.6rem 2.4rem 2rem; overflow-y: auto; max-height: 88vh;
-    font-size: 13.5px; line-height: 1.75; display: flex; flex-direction: column;
-  }
-  .modal-categorias { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 1.4rem; }
-  .modal-cat-chip { font-size: 9.5px; padding: 3px 9px; border-radius: 10px; color: #fff; letter-spacing: 0.04em; }
-  .modal-relato { white-space: pre-wrap; color: #d8d8d8; flex: 1; font-family: 'Droid Serif', Georgia, serif; font-size: 1.06em; }
-  .modal-relato.cargando { color: #444; }
-  .boton-texto {
-    background: none; border: none; color: rgba(255,255,255,0.28); font-size: 9px;
-    letter-spacing: 0.14em; cursor: pointer; font-family: 'Droid Sans Mono', ui-monospace, monospace;
-    padding: 0; transition: color 0.2s;
-  }
-  .boton-texto:hover, .boton-texto:focus-visible { color: rgba(255,255,255,0.7); }
-  .modal-traducir { display: none; margin-top: 1.4rem; align-self: flex-start; }
-  .modal-pie { display: flex; justify-content: space-between; margin-top: 2rem; padding-top: 1rem; border-top: 0.5px solid #1a1a1a; }
-  .modal-cerrar { position: absolute; top: 1rem; right: 1.4rem; font-size: 11px; color: #555; letter-spacing: 0.1em; }
+  .marco { display: block; width: var(--w, 70%); aspect-ratio: var(--ar, 1 / 1); overflow: hidden; background: #ebe8e1; }
+  .marco img { display: block; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 0.9s; }
+  .marco img.cargada { opacity: 1; }
+  .marco:hover img { filter: contrast(1.04) brightness(0.97); }
+  .rotulo { display: flex; gap: 8px; align-items: center; color: var(--gris); width: var(--w, 70%); }
+  .imagen:hover .rotulo, .marco:focus-visible + .rotulo { color: var(--tinta); }
+  .puntos { display: inline-flex; gap: 3px; }
+  .punto { width: 6px; height: 6px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+  .rotulo .marca-nueva { color: var(--tinta); }
 
-  @media (max-width: 760px) {
-    header { padding: 1.1rem 1.1rem 1rem; }
-    .n-respuestas { font-size: 28px; }
-    #grilla { padding: 0 1.1rem 2rem; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
-    #modal { padding: 0; align-items: stretch; }
-    .modal-contenido { grid-template-columns: 1fr; max-height: none; height: 100%; overflow-y: auto; }
-    .modal-imagen img { max-height: 60vh; }
-    .modal-texto { max-height: none; overflow: visible; padding: 1.6rem 1.4rem; font-size: 12.5px; }
+  /* palabras de los relatos entre las imágenes */
+  .palabra {
+    display: flex; flex-direction: column; gap: 4px;
+    padding: 12% 10%;
+    align-items: var(--x, flex-start);
+    justify-content: var(--y, center);
+  }
+  .palabra .linea { display: inline-flex; align-items: baseline; gap: 7px; white-space: nowrap; }
+  .palabra .punto { transform: translateY(-0.18em); }
+  .palabra.serif .linea { font-family: var(--serif); font-size: calc(var(--celda) * var(--tam, 0.13)); line-height: 1.1; }
+  .palabra.mono .linea { font-size: 11px; text-transform: uppercase; }
+
+  /* paréntesis finos, como los del título */
+  .parentesis { display: flex; align-items: stretch; justify-content: center; padding: 8% 0; }
+  .parentesis svg { height: 100%; width: auto; color: var(--tinta); overflow: visible; }
+
+  /* fecha de llegada de los relatos */
+  .fecha { grid-column: 1 / span 2; padding: 10px 12px; color: var(--gris); }
+
+  #vacio { display: none; text-align: center; color: var(--gris); padding: 80px 20px; }
+
+  /* ---------- ficha: la imagen abierta, con el relato debajo ---------- */
+  #ficha {
+    position: fixed; inset: 0; z-index: 10; display: none;
+    background: var(--papel); overflow-y: auto; overscroll-behavior: contain;
+  }
+  #ficha.abierta { display: block; }
+  .ficha-barra {
+    position: sticky; top: 0; z-index: 2;
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 22px var(--margen) 18px; background: var(--papel);
+  }
+  .ficha-barra .derecha { display: flex; gap: 22px; }
+  .ficha-cuerpo { width: min(640px, calc(100vw - 2 * var(--margen))); margin: 10px auto 90px; }
+  .ficha-cuerpo .foto { display: block; width: 100%; aspect-ratio: 1 / 1; object-fit: contain; background: #ebe8e1; }
+  .ficha-texto { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 24px; margin-top: 22px; }
+  .ficha-meta { color: var(--gris); display: flex; flex-direction: column; gap: 6px; }
+  .ficha-meta .cat { display: flex; gap: 7px; align-items: center; color: var(--tinta); }
+  #ficha-relato { font-family: var(--serif); font-size: 13px; line-height: 1.7; white-space: pre-wrap; color: #222; margin: 0; }
+  #ficha-relato.cargando { color: var(--gris-claro); }
+  #ficha-relato mark { background: none; color: inherit; text-decoration: underline; text-decoration-thickness: 1.5px; text-underline-offset: 3px; text-decoration-color: var(--c, var(--tinta)); }
+  #ficha-traducir { display: none; margin-top: 18px; color: var(--gris); }
+  #ficha-traducir:hover { color: var(--tinta); }
+  .ficha-nav { display: flex; justify-content: space-between; margin-top: 46px; color: var(--gris); }
+  .ficha-nav button:hover, .ficha-barra button:hover { color: var(--tinta); }
+
+  @media (max-width: 700px) {
+    :root { --margen: 16px; }
+    .ficha-texto { grid-template-columns: 1fr; gap: 14px; }
   }
 </style>
 </head>
 <body>
-<header>
+<header class="cabecera">
   <div>
     <div class="titulo">ESPÉCULO(AR)</div>
+    <div class="mes" id="mes"></div>
   </div>
-  <div class="contador">
-    <div class="n-respuestas" id="n-imagenes">-</div>
-    <div class="n-label" id="etiqueta-imagenes">IMÁGENES</div>
-    <div class="en-creacion" id="en-creacion"><span class="pulso"></span><span id="n-creacion">0</span> <span id="etiqueta-creacion">EN CREACIÓN</span></div>
+  <div class="cuenta">
+    <div id="n-imagenes">&nbsp;</div>
+    <div class="creando" id="n-creando"></div>
+    <button id="actualizar" type="button"></button>
   </div>
 </header>
 
-<main id="grilla" aria-label="Imágenes generadas a partir de los relatos"></main>
-<div id="vacio">las imágenes aparecerán aquí a medida que se generen</div>
+<main class="lamina" id="lamina" aria-label="Imágenes generadas a partir de los relatos"></main>
+<div id="vacio"></div>
 
-<div id="modal" role="dialog" aria-modal="true" aria-label="Imagen y relato">
-  <div class="modal-contenido">
-    <div class="modal-imagen"><img id="modal-img" alt=""></div>
-    <div class="modal-texto">
-      <div class="modal-categorias" id="modal-cats"></div>
-      <div class="modal-relato" id="modal-relato"></div>
-      <button class="boton-texto modal-traducir" id="modal-traducir" type="button">see in English</button>
-      <div class="modal-pie">
-        <button class="boton-texto" id="anterior" type="button">anterior</button>
-        <button class="boton-texto" id="siguiente" type="button">siguiente</button>
+<div id="ficha" role="dialog" aria-modal="true" aria-label="Imagen y relato">
+  <div class="ficha-barra">
+    <span>ESPÉCULO(AR) <span id="ficha-num"></span></span>
+    <span class="derecha"><button id="cerrar" type="button"></button></span>
+  </div>
+  <article class="ficha-cuerpo">
+    <img class="foto" id="ficha-img" alt="">
+    <div class="ficha-texto">
+      <div class="ficha-meta">
+        <span id="ficha-fecha"></span>
+        <span id="ficha-cats" class="ficha-cats"></span>
+      </div>
+      <div>
+        <p id="ficha-relato"></p>
+        <button id="ficha-traducir" type="button"></button>
       </div>
     </div>
-    <button class="boton-texto modal-cerrar" id="cerrar" type="button">cerrar</button>
-  </div>
+    <nav class="ficha-nav">
+      <button id="anterior" type="button"></button>
+      <button id="siguiente" type="button"></button>
+    </nav>
+  </article>
 </div>
 
 <script>
 // ============================================================
-// Galería de Espéculo(ar): todas las imágenes generadas y, al abrir cada
-// una, el relato que la produjo. Se actualiza sola cuando llegan nuevas.
-//   ?idioma=en      etiquetas de la página en inglés
+// Galería de Espéculo(ar)
+// ============================================================
+// Las imágenes se reparten sobre una grilla de celdas con puntos en las
+// esquinas, con tamaños, márgenes y alineaciones distintos, celdas vacías,
+// palabras tomadas de cada relato y paréntesis como los del título. La
+// disposición sale de una semilla por imagen: es irregular, pero no cambia
+// al recargar. Al abrir una imagen aparece el relato debajo, en letra chica.
+//   ?idioma=en      etiquetas en inglés
 //   ?servidor=URL   otro servidor (pruebas)
 // ============================================================
 const RENDER_API = 'https://especuloar-servidor.onrender.com';
@@ -142,6 +186,10 @@ const API_BASE = parametros.get('servidor') ||
   ((_esRedLocal && location.protocol.startsWith('http')) ? location.origin
     : (location.protocol === 'file:' ? 'http://127.0.0.1:5000' : RENDER_API));
 const SONDEO_MS = 30000;
+
+// Categorías cuyas palabras no flotan entre las imágenes (siguen visibles
+// en el relato). Ejemplo: ['violencia_sexual'].
+const CATEGORIAS_SIN_PALABRAS = [];
 
 // Mismos colores y nombres que la galaxia (display.html).
 const CATEGORIAS = {
@@ -159,257 +207,432 @@ const CATEGORIAS = {
   'artefactos_procedimientos': { color: '#7C8A99', nombre: 'Artefactos / procedimientos', nombre_en: 'Artifacts / procedures' },
   'emergentes':            { color: '#9A8CFF', nombre: 'Emergentes',              nombre_en: 'Emergent' }
 };
+// Los colores muy claros se ven poco sobre el papel: llevan un borde fino.
+const COLORES_CLAROS = new Set(['#E8E0D4', '#F5DD2C']);
 
-const IDIOMA_PAGINA = parametros.get('idioma') === 'en' ? 'en' : 'es';
-const ETIQUETAS = {
-  es: { imagenes: 'IMÁGENES', creacion: 'EN CREACIÓN', vacio: 'las imágenes aparecerán aquí a medida que se generen',
-        anterior: 'anterior', siguiente: 'siguiente', cerrar: 'cerrar', alt: 'Imagen generada a partir de un relato', cargando: 'cargando relato' },
-  en: { imagenes: 'IMAGES', creacion: 'IN PROGRESS', vacio: 'images will appear here as they are generated',
-        anterior: 'previous', siguiente: 'next', cerrar: 'close', alt: 'Image generated from a story', cargando: 'loading story' }
-}[IDIOMA_PAGINA];
-document.documentElement.lang = IDIOMA_PAGINA;
-document.getElementById('etiqueta-imagenes').textContent = ETIQUETAS.imagenes;
-document.getElementById('etiqueta-creacion').textContent = ETIQUETAS.creacion;
-document.getElementById('vacio').textContent = ETIQUETAS.vacio;
-document.getElementById('anterior').textContent = ETIQUETAS.anterior;
-document.getElementById('siguiente').textContent = ETIQUETAS.siguiente;
-document.getElementById('cerrar').textContent = ETIQUETAS.cerrar;
-
-// Texto oscuro sobre los colores claros (Aromas, Profesional mujer), claro sobre el resto.
-function colorTextoChip(color) {
-  const c = String(color).trim();
-  let rgb = null;
-  const hex = c.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
-  const fun = c.match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/i);
-  if (hex) rgb = hex.slice(1, 4).map(v => parseInt(v, 16));
-  else if (fun) rgb = fun.slice(1, 4).map(Number);
-  if (!rgb) return '#fff';
-  const luz = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
-  return luz > 170 ? '#111' : '#fff';
-}
+const IDIOMA = parametros.get('idioma') === 'en' ? 'en' : 'es';
+const T = {
+  es: { imagenes: n => `${n} ${n === 1 ? 'imagen' : 'imágenes'}`, creando: n => `${n} en creación`,
+        nuevas: n => `(${n} ${n === 1 ? 'nueva' : 'nuevas'})`, vacio: '(las imágenes aparecerán aquí a medida que se generen)',
+        cerrar: '(cerrar)', anterior: '(anterior)', siguiente: '(siguiente)', abrir: n => `Abrir imagen ${n}`, imagen: n => `Imagen ${n}`, nueva: 'nueva', cargando: '...' },
+  en: { imagenes: n => `${n} ${n === 1 ? 'image' : 'images'}`, creando: n => `${n} in progress`,
+        nuevas: n => `(${n} new)`, vacio: '(images will appear here as they are generated)',
+        cerrar: '(close)', anterior: '(previous)', siguiente: '(next)', abrir: n => `Open image ${n}`, imagen: n => `Image ${n}`, nueva: 'new', cargando: '...' }
+}[IDIOMA];
+document.documentElement.lang = IDIOMA;
 
 function nombreCategoria(cat, idioma) {
   const info = CATEGORIAS[cat];
-  if (!info) return cat;
-  return idioma === 'en' ? info.nombre_en : info.nombre;
+  return info ? (idioma === 'en' ? info.nombre_en : info.nombre) : cat;
+}
+function crearPunto(cat, tam) {
+  const color = (CATEGORIAS[cat] || { color: '#888' }).color;
+  const p = document.createElement('span');
+  p.className = 'punto';
+  p.style.background = color;
+  if (tam) { p.style.width = p.style.height = tam + 'px'; }
+  if (COLORES_CLAROS.has(color)) p.style.boxShadow = 'inset 0 0 0 0.5px #8b8880';
+  return p;
+}
+function fechaCorta(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  const dd = String(d.getDate()).padStart(2, '0'), mm = String(d.getMonth() + 1).padStart(2, '0');
+  return `${dd}.${mm}.${d.getFullYear()}`;
+}
+function numero(n) { return '(' + String(n).padStart(3, '0') + ')'; }
+
+const ahora = new Date();
+document.getElementById('mes').textContent =
+  String(ahora.getMonth() + 1).padStart(2, '0') + '.' + ahora.getFullYear();
+
+// ---------- azar con semilla (la disposición no cambia al recargar) ----------
+function azar(semilla) {
+  let a = (semilla * 2654435761) >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const elegir = (r, lista) => lista[Math.floor(r() * lista.length)];
+
+// ---------- medidas de la lámina ----------
+const raiz = document.documentElement;
+let COLS = 8;
+function medir() {
+  const ancho = window.innerWidth;
+  const cols = ancho >= 1500 ? 9 : ancho >= 1150 ? 8 : ancho >= 860 ? 6 : ancho >= 560 ? 4 : 3;
+  const margen = ancho < 700 ? 16 : 40;
+  const celda = Math.floor((Math.min(ancho, 1700) - 2 * margen - 2) / cols);
+  raiz.style.setProperty('--cols', cols);
+  raiz.style.setProperty('--celda', celda + 'px');
+  const cambio = cols !== COLS;
+  COLS = cols;
+  return { cambio, celda };
 }
 
-// ---------- grilla ----------
-const grilla = document.getElementById('grilla');
-const vacio = document.getElementById('vacio');
-const nImagenes = document.getElementById('n-imagenes');
-const enCreacion = document.getElementById('en-creacion');
-const nCreacion = document.getElementById('n-creacion');
-let imagenes = [];               // más nuevas primero
-const celdas = new Map();        // id -> elemento
-let primeraCarga = true;
-let totalMostrado = null;
-const ANCHO_MINIATURA = (window.devicePixelRatio || 1) > 1.5 ? 384 : 256;
+// Formas posibles de una imagen: celdas que ocupa, ancho del marco y proporción.
+const FORMAS = [
+  { nombre: 'chica',      peso: 38, c: 1, f: 1, w: [62, 76], ar: '1 / 1' },
+  { nombre: 'mediana',    peso: 28, c: 2, f: 2, w: [64, 82], ar: '1 / 1' },
+  { nombre: 'vertical',   peso: 14, c: 1, f: 2, w: [80, 92], ar: '3 / 4' },
+  { nombre: 'horizontal', peso: 12, c: 2, f: 1, w: [50, 58], ar: '3 / 2' },
+  { nombre: 'grande',     peso: 8,  c: 3, f: 3, w: [66, 80], ar: '1 / 1', minCols: 6 },
+];
+function elegirForma(r) {
+  const posibles = FORMAS.filter(f => !f.minCols || COLS >= f.minCols);
+  let total = posibles.reduce((s, f) => s + f.peso, 0), x = r() * total;
+  for (const f of posibles) { if ((x -= f.peso) < 0) return f; }
+  return posibles[0];
+}
+const ALINEAR = ['flex-start', 'center', 'flex-end'];
 
-function crearCelda(img, indice) {
-  const b = document.createElement('button');
-  b.className = 'celda';
-  b.type = 'button';
-  b.setAttribute('aria-label', ETIQUETAS.alt);
+// ---------- piezas ----------
+function piezaImagen(img, n, r) {
+  const forma = elegirForma(r);
+  const fig = document.createElement('figure');
+  fig.className = 'pieza imagen' + (img.nueva ? ' nueva' : '');
+  fig.style.gridColumn = `span ${forma.c}`;
+  fig.style.gridRow = `span ${forma.f}`;
+  fig.style.margin = '0';
+  const w = forma.w[0] + r() * (forma.w[1] - forma.w[0]);
+  fig.style.setProperty('--w', w.toFixed(1) + '%');
+  fig.style.setProperty('--ar', forma.ar);
+  fig.style.setProperty('--pad', (7 + r() * 7).toFixed(1) + '%');
+  fig.style.setProperty('--x', elegir(r, ALINEAR));
+  fig.style.setProperty('--y', elegir(r, ALINEAR));
+
+  const marco = document.createElement('button');
+  marco.className = 'marco';
+  marco.type = 'button';
+  marco.setAttribute('aria-label', T.abrir(numero(n)));
   const foto = document.createElement('img');
   foto.loading = 'lazy';
   foto.decoding = 'async';
-  foto.alt = ETIQUETAS.alt;
+  foto.alt = '';
   foto.onload = () => foto.classList.add('cargada');
-  foto.src = `${API_BASE}${img.url}&ancho=${ANCHO_MINIATURA}`;
-  b.appendChild(foto);
-  const puntos = document.createElement('div');
+  const px = parseFloat(getComputedStyle(raiz).getPropertyValue('--celda')) * forma.c * (window.devicePixelRatio || 1);
+  const ancho = Math.max(128, Math.min(768, Math.round(px / 128) * 128));
+  foto.src = `${API_BASE}${img.url}&ancho=${ancho}`;
+  marco.appendChild(foto);
+  marco.addEventListener('click', () => abrir(img.id, marco));
+
+  const rotulo = document.createElement('figcaption');
+  rotulo.className = 'rotulo';
+  const num = document.createElement('span');
+  num.className = 'num';
+  num.textContent = numero(n);
+  const puntos = document.createElement('span');
   puntos.className = 'puntos';
-  for (const color of img.colores || []) {
-    const p = document.createElement('span');
-    p.className = 'punto';
-    p.style.background = color;
-    puntos.appendChild(p);
+  for (const cat of img.categorias || []) puntos.appendChild(crearPunto(cat));
+  rotulo.append(num, puntos);
+  if (img.nueva) {
+    const marca = document.createElement('span');
+    marca.className = 'marca-nueva';
+    marca.textContent = T.nueva;
+    rotulo.appendChild(marca);
   }
-  b.appendChild(puntos);
-  b.addEventListener('click', () => abrir(imagenes.findIndex(x => x.id === img.id)));
-  return b;
+  fig.append(marco, rotulo);
+  return fig;
 }
 
-async function cargar() {
+function piezaPalabras(palabras, r) {
+  const div = document.createElement('div');
+  const serif = r() < 0.72;
+  div.className = 'pieza palabra ' + (serif ? 'serif' : 'mono');
+  div.setAttribute('aria-hidden', 'true');
+  const cuantas = palabras.length > 1 && r() < 0.3 ? 2 : 1;
+  const largo = Math.max(...palabras.slice(0, cuantas).map(p => p.texto.length));
+  // las palabras largas ocupan dos celdas para no desbordarse
+  const columnas = serif && (largo > 9 || cuantas === 2) && COLS >= 4 ? 2 : 1;
+  div.style.gridColumn = `span ${columnas}`;
+  div.style.setProperty('--tam', (0.11 + r() * 0.05).toFixed(3));
+  div.style.setProperty('--x', elegir(r, ALINEAR));
+  div.style.setProperty('--y', elegir(r, ALINEAR));
+  const inicio = Math.floor(r() * palabras.length);
+  for (let i = 0; i < cuantas; i++) {
+    const p = palabras[(inicio + i) % palabras.length];
+    const linea = document.createElement('span');
+    linea.className = 'linea';
+    linea.append(crearPunto(p.categoria, serif ? 7 : 6), document.createTextNode(p.texto));
+    div.appendChild(linea);
+  }
+  return div;
+}
+
+function piezaParentesis(abre) {
+  const div = document.createElement('div');
+  div.className = 'pieza parentesis';
+  div.style.gridRow = 'span 2';
+  div.setAttribute('aria-hidden', 'true');
+  const d = abre ? 'M30 2 C 6 52, 6 148, 30 198' : 'M10 2 C 34 52, 34 148, 10 198';
+  div.innerHTML = `<svg viewBox="0 0 40 200" preserveAspectRatio="none"><path d="${d}" fill="none" stroke="currentColor" stroke-width="1.4" vector-effect="non-scaling-stroke"/></svg>`;
+  return div;
+}
+
+function piezaVacia() {
+  const div = document.createElement('div');
+  div.className = 'pieza';
+  return div;
+}
+
+function piezaFecha(texto) {
+  const div = document.createElement('div');
+  div.className = 'pieza fecha';
+  div.textContent = texto;
+  return div;
+}
+
+// ---------- composición ----------
+const lamina = document.getElementById('lamina');
+let imagenes = [];        // más nuevas primero
+let numeros = new Map();  // id -> número de archivo (la más antigua es 001)
+let firmaActual = '';
+let pendientesNuevas = 0;
+
+function componer() {
+  lamina.innerHTML = '';
+  document.getElementById('vacio').style.display = imagenes.length ? 'none' : 'block';
+  let fechaAnterior = null;
+  let abierto = 0;           // piezas que faltan para cerrar un paréntesis
+  for (const img of imagenes) {
+    const r = azar(img.id * 31 + 7);
+    const fecha = fechaCorta(img.fecha);
+    if (fecha && fecha !== fechaAnterior) {
+      lamina.appendChild(piezaFecha(fecha));
+      fechaAnterior = fecha;
+    }
+    const vacias = r() < 0.34 ? (r() < 0.3 ? 2 : 1) : 0;
+    for (let i = 0; i < vacias; i++) lamina.appendChild(piezaVacia());
+    if (!abierto && r() < 0.09) {
+      lamina.appendChild(piezaParentesis(true));
+      abierto = 2 + Math.floor(r() * 3);
+    }
+    lamina.appendChild(piezaImagen(img, numeros.get(img.id), r));
+    const palabras = (img.palabras || []).filter(p => !CATEGORIAS_SIN_PALABRAS.includes(p.categoria));
+    if (palabras.length && r() < 0.5) lamina.appendChild(piezaPalabras(palabras, r));
+    if (abierto && --abierto === 0) lamina.appendChild(piezaParentesis(false));
+  }
+  if (abierto) lamina.appendChild(piezaParentesis(false));
+}
+
+// ---------- datos ----------
+async function cargar(forzar) {
   let datos;
   try {
-    const res = await fetch(`${API_BASE}/imagenes`, { cache: 'no-store' });
+    const res = await fetch(`${API_BASE}/imagenes?palabras=1`, { cache: 'no-store' });
     if (!res.ok) return;
     datos = await res.json();
   } catch (e) { return; }
   const lista = (datos.imagenes || []).slice().sort((a, b) => b.respuesta_id - a.respuesta_id);
-  const presentes = new Set(lista.map(i => i.id));
-  // quitar las que se ocultaron desde la administración
-  for (const [id, el] of celdas) {
-    if (!presentes.has(id)) { el.remove(); celdas.delete(id); }
-  }
-  // agregar o actualizar, respetando el orden (más nuevas arriba)
-  let anterior = null;
-  for (const img of lista) {
-    let el = celdas.get(img.id);
-    const previa = imagenes.find(x => x.id === img.id);
-    if (el && previa && previa.url !== img.url) { el.remove(); el = null; }   // regenerada
-    if (!el) {
-      el = crearCelda(img);
-      if (!primeraCarga) el.classList.add('nueva');
-      celdas.set(img.id, el);
-    }
-    // solo se mueve si no está ya en su lugar (evita reinsertar toda la grilla)
-    if (anterior) { if (el.previousElementSibling !== anterior) anterior.after(el); }
-    else if (grilla.firstElementChild !== el) grilla.prepend(el);
-    anterior = el;
-  }
-  imagenes = lista;
-  primeraCarga = false;
-  vacio.style.display = lista.length ? 'none' : 'block';
-  const total = lista.length;
-  if (totalMostrado !== null && total > totalMostrado) {
-    nImagenes.classList.add('sube');
-    setTimeout(() => nImagenes.classList.remove('sube'), 400);
-  }
-  totalMostrado = total;
-  nImagenes.textContent = total;
+  const firma = lista.map(i => i.id + ':' + i.url).join('|');
   const creando = (datos.pendientes || 0) + (datos.generando || 0);
-  nCreacion.textContent = creando;
-  enCreacion.classList.toggle('visible', creando > 0);
+  document.getElementById('n-imagenes').textContent = T.imagenes(lista.length);
+  document.getElementById('n-creando').textContent = creando ? T.creando(creando) : '';
+  if (firma === firmaActual && !forzar) return;
+
+  const conocidas = new Set(imagenes.map(i => i.id));
+  const fichaAbierta = document.getElementById('ficha').classList.contains('abierta');
+  // Si la persona está mirando más abajo o tiene una imagen abierta, no se
+  // reordena la lámina bajo sus ojos: se ofrece actualizar.
+  if (firmaActual && !forzar && (fichaAbierta || window.scrollY > 300)) {
+    pendientesNuevas = lista.filter(i => !conocidas.has(i.id)).length;
+    const boton = document.getElementById('actualizar');
+    boton.textContent = pendientesNuevas ? T.nuevas(pendientesNuevas) : '(actualizar)';
+    boton.classList.add('visible');
+    return;
+  }
+  const primeraVez = !firmaActual;
+  for (const img of lista) img.nueva = !primeraVez && !conocidas.has(img.id);
+  imagenes = lista;
+  numeros = new Map([...lista].sort((a, b) => a.respuesta_id - b.respuesta_id).map((img, i) => [img.id, i + 1]));
+  firmaActual = firma;
+  document.getElementById('actualizar').classList.remove('visible');
+  componer();
+  if (primeraVez) abrirDesdeDireccion();
 }
 
-// ---------- imagen y relato ----------
-const modal = document.getElementById('modal');
-const modalImg = document.getElementById('modal-img');
-const modalRelato = document.getElementById('modal-relato');
-const modalCats = document.getElementById('modal-cats');
-const botonTraducir = document.getElementById('modal-traducir');
+document.getElementById('actualizar').addEventListener('click', () => {
+  window.scrollTo({ top: 0 });
+  firmaActual = firmaActual || 'x';
+  cargar(true);
+});
+
+// ---------- ficha ----------
+const ficha = document.getElementById('ficha');
+const fichaImg = document.getElementById('ficha-img');
+const fichaRelato = document.getElementById('ficha-relato');
+const fichaCats = document.getElementById('ficha-cats');
+const botonTraducir = document.getElementById('ficha-traducir');
+document.getElementById('cerrar').textContent = T.cerrar;
+document.getElementById('anterior').textContent = T.anterior;
+document.getElementById('siguiente').textContent = T.siguiente;
+document.getElementById('vacio').textContent = T.vacio;
+
 const TEXTOS_TRADUCCION = {
-  en: { ver: 'see in English', original: 'ver original', cargando: 'translating...', error: 'translation unavailable' },
-  es: { ver: 'ver en español', original: 'see original', cargando: 'traduciendo...', error: 'traducción no disponible' }
+  en: { ver: '(see in English)', original: '(ver original)', cargando: '(translating)', error: '(translation unavailable)' },
+  es: { ver: '(ver en español)', original: '(see original)', cargando: '(traduciendo)', error: '(traducción no disponible)' }
 };
-let indiceActual = -1;
-let relatoActual = null;   // {id, original, idioma, destino, traducciones, categorias, mostrandoTraduccion}
+let actual = null;        // { img, relato, idioma, destino, traducciones, mostrandoTraduccion }
+let origenFoco = null;
 let traduciendo = false;
 
-function pintarChips() {
-  if (!relatoActual) return;
-  const idioma = relatoActual.mostrandoTraduccion ? relatoActual.destino : relatoActual.idioma;
-  modalCats.innerHTML = '';
-  for (const cat of relatoActual.categorias) {
-    const chip = document.createElement('span');
-    chip.className = 'modal-cat-chip';
-    chip.style.background = (CATEGORIAS[cat] || { color: '#888' }).color;
-    chip.style.color = colorTextoChip(chip.style.background);
-    chip.textContent = nombreCategoria(cat, idioma);
-    modalCats.appendChild(chip);
+function pintarCategorias(idioma) {
+  fichaCats.innerHTML = '';
+  for (const cat of actual.categorias) {
+    const linea = document.createElement('span');
+    linea.className = 'cat';
+    linea.append(crearPunto(cat, 6), document.createTextNode(nombreCategoria(cat, idioma)));
+    fichaCats.appendChild(linea);
   }
 }
 
-function textoBotonTraduccion() {
-  const t = TEXTOS_TRADUCCION[relatoActual.destino];
-  return relatoActual.mostrandoTraduccion ? t.original : t.ver;
+// Subraya en el relato, con el color de su categoría, las palabras que lo
+// clasificaron (las mismas que flotan en la lámina).
+function pintarRelato(texto, palabras) {
+  fichaRelato.textContent = '';
+  if (!palabras || !palabras.length) { fichaRelato.textContent = texto; return; }
+  const bajo = texto.toLowerCase();
+  const marcas = [];
+  for (const p of palabras) {
+    let desde = 0, i;
+    while ((i = bajo.indexOf(p.texto, desde)) !== -1) {
+      const antes = i === 0 ? '' : bajo[i - 1], despues = bajo[i + p.texto.length] || '';
+      if (!/[\p{L}\p{N}]/u.test(antes) && !/[\p{L}\p{N}]/u.test(despues)) marcas.push([i, i + p.texto.length, p.categoria]);
+      desde = i + p.texto.length;
+    }
+  }
+  marcas.sort((a, b) => a[0] - b[0]);
+  let pos = 0;
+  for (const [ini, fin, cat] of marcas) {
+    if (ini < pos) continue;
+    fichaRelato.appendChild(document.createTextNode(texto.slice(pos, ini)));
+    const m = document.createElement('mark');
+    m.style.setProperty('--c', (CATEGORIAS[cat] || { color: '#151515' }).color);
+    m.textContent = texto.slice(ini, fin);
+    fichaRelato.appendChild(m);
+    pos = fin;
+  }
+  fichaRelato.appendChild(document.createTextNode(texto.slice(pos)));
 }
 
-async function abrir(indice) {
-  if (indice < 0 || indice >= imagenes.length) return;
-  indiceActual = indice;
-  const img = imagenes[indice];
-  modalImg.src = `${API_BASE}${img.url}`;
-  modalImg.alt = ETIQUETAS.alt;
-  relatoActual = null;
-  modalCats.innerHTML = '';
-  modalRelato.textContent = ETIQUETAS.cargando;
-  modalRelato.classList.add('cargando');
+async function abrir(id, desde) {
+  const img = imagenes.find(x => x.id === id);
+  if (!img) return;
+  origenFoco = desde || origenFoco;
+  actual = { img, categorias: img.categorias || [], relato: null };
+  const n = numeros.get(id);
+  document.getElementById('ficha-num').textContent = numero(n);
+  document.getElementById('ficha-fecha').textContent = fechaCorta(img.fecha);
+  fichaImg.src = `${API_BASE}${img.url}`;
+  fichaImg.alt = T.imagen(numero(n));
+  fichaRelato.textContent = T.cargando;
+  fichaRelato.classList.add('cargando');
   botonTraducir.style.display = 'none';
-  modal.classList.add('activo');
-  document.body.style.overflow = 'hidden';
-  const pedido = img.respuesta_id;
+  pintarCategorias(IDIOMA);
+  if (!ficha.classList.contains('abierta')) {
+    ficha.classList.add('abierta');
+    document.body.style.overflow = 'hidden';
+  }
+  ficha.scrollTop = 0;
+  history.replaceState(null, '', '#r' + img.respuesta_id);
+  const pedido = actual;
   try {
-    const res = await fetch(`${API_BASE}/relato/${pedido}`);
+    const res = await fetch(`${API_BASE}/relato/${img.respuesta_id}`);
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
-    if (indiceActual !== indice) return;          // ya se pasó a otra imagen
+    if (actual !== pedido) return;
     const idioma = data.idioma === 'en' ? 'en' : 'es';
-    const cats = data.categorias_activadas || img.categorias || [];
-    relatoActual = {
-      id: pedido, original: data.relato || '', idioma, destino: idioma === 'en' ? 'es' : 'en',
+    Object.assign(actual, {
+      relato: data.relato || '', idioma, destino: idioma === 'en' ? 'es' : 'en',
       traducciones: data.traducciones || {}, mostrandoTraduccion: false,
-      categorias: Array.isArray(cats) ? cats : Object.keys(cats),
-    };
-    modalRelato.textContent = relatoActual.original;
-    modalRelato.classList.remove('cargando');
-    botonTraducir.textContent = textoBotonTraduccion();
-    botonTraducir.disabled = false;
-    botonTraducir.style.display = relatoActual.original ? 'block' : 'none';
-    pintarChips();
+    });
+    fichaRelato.classList.remove('cargando');
+    pintarRelato(actual.relato, img.palabras);
+    pintarCategorias(idioma);
+    botonTraducir.textContent = TEXTOS_TRADUCCION[actual.destino].ver;
+    botonTraducir.style.display = actual.relato ? 'inline-block' : 'none';
   } catch (e) {
-    if (indiceActual === indice) modalRelato.textContent = '';
+    if (actual === pedido) fichaRelato.textContent = '';
   }
 }
 
 async function alternarTraduccion() {
-  if (!relatoActual || traduciendo) return;
-  const r = relatoActual;
-  if (r.mostrandoTraduccion) {
-    modalRelato.textContent = r.original;
-    r.mostrandoTraduccion = false;
-    botonTraducir.textContent = textoBotonTraduccion();
-    pintarChips();
+  if (!actual || actual.relato === null || traduciendo) return;
+  const a = actual, t = TEXTOS_TRADUCCION[a.destino];
+  if (a.mostrandoTraduccion) {
+    a.mostrandoTraduccion = false;
+    pintarRelato(a.relato, a.img.palabras);
+    pintarCategorias(a.idioma);
+    botonTraducir.textContent = t.ver;
     return;
   }
-  if (r.traducciones[r.destino]) {
-    modalRelato.textContent = r.traducciones[r.destino];
-    r.mostrandoTraduccion = true;
-    botonTraducir.textContent = textoBotonTraduccion();
-    pintarChips();
-    return;
+  let texto = a.traducciones[a.destino];
+  if (!texto) {
+    traduciendo = true;
+    botonTraducir.textContent = t.cargando;
+    try {
+      const res = await fetch(`${API_BASE}/traducir/${a.img.respuesta_id}?a=${a.destino}`, { method: 'POST' });
+      if (res.ok) texto = (await res.json()).texto || null;
+    } catch (e) { /* se informa abajo */ }
+    traduciendo = false;
+    if (actual !== a) return;
+    if (!texto) {
+      botonTraducir.textContent = t.error;
+      setTimeout(() => { if (actual === a && !a.mostrandoTraduccion) botonTraducir.textContent = t.ver; }, 2500);
+      return;
+    }
+    a.traducciones[a.destino] = texto;
   }
-  traduciendo = true;
-  botonTraducir.disabled = true;
-  botonTraducir.textContent = TEXTOS_TRADUCCION[r.destino].cargando;
-  let texto = null;
-  try {
-    const res = await fetch(`${API_BASE}/traducir/${r.id}?a=${r.destino}`, { method: 'POST' });
-    if (res.ok) texto = (await res.json()).texto || null;
-  } catch (e) { /* se informa abajo */ }
-  traduciendo = false;
-  botonTraducir.disabled = false;
-  if (relatoActual !== r) return;     // se cerró o se cambió de imagen
-  if (texto) {
-    r.traducciones[r.destino] = texto;
-    modalRelato.textContent = texto;
-    r.mostrandoTraduccion = true;
-    botonTraducir.textContent = textoBotonTraduccion();
-    pintarChips();
-  } else {
-    botonTraducir.textContent = TEXTOS_TRADUCCION[r.destino].error;
-    setTimeout(() => { if (relatoActual === r && !r.mostrandoTraduccion) botonTraducir.textContent = textoBotonTraduccion(); }, 2500);
-  }
+  a.mostrandoTraduccion = true;
+  fichaRelato.textContent = texto;
+  pintarCategorias(a.destino);
+  botonTraducir.textContent = t.original;
 }
 
 function cerrar() {
-  modal.classList.remove('activo');
+  ficha.classList.remove('abierta');
   document.body.style.overflow = '';
-  indiceActual = -1;
-  relatoActual = null;
-  modalImg.removeAttribute('src');
+  actual = null;
+  fichaImg.removeAttribute('src');
+  history.replaceState(null, '', location.pathname + location.search);
+  if (origenFoco) origenFoco.focus({ preventScroll: true });
 }
 
 function mover(paso) {
-  if (indiceActual < 0 || !imagenes.length) return;
-  abrir((indiceActual + paso + imagenes.length) % imagenes.length);
+  if (!actual || !imagenes.length) return;
+  const i = imagenes.findIndex(x => x.id === actual.img.id);
+  abrir(imagenes[(i + paso + imagenes.length) % imagenes.length].id);
+}
+
+function abrirDesdeDireccion() {
+  const m = location.hash.match(/^#r(\d+)$/);
+  if (!m) return;
+  const img = imagenes.find(x => x.respuesta_id === Number(m[1]));
+  if (img) abrir(img.id);
 }
 
 botonTraducir.addEventListener('click', alternarTraduccion);
 document.getElementById('cerrar').addEventListener('click', cerrar);
 document.getElementById('anterior').addEventListener('click', () => mover(-1));
 document.getElementById('siguiente').addEventListener('click', () => mover(1));
-modal.addEventListener('click', (e) => { if (e.target === modal) cerrar(); });
 document.addEventListener('keydown', (e) => {
-  if (!modal.classList.contains('activo')) return;
+  if (!ficha.classList.contains('abierta')) return;
   if (e.key === 'Escape') cerrar();
   else if (e.key === 'ArrowLeft') mover(-1);
   else if (e.key === 'ArrowRight') mover(1);
 });
 
+let esperaMedida = null;
+window.addEventListener('resize', () => {
+  clearTimeout(esperaMedida);
+  esperaMedida = setTimeout(() => { if (medir().cambio && imagenes.length) componer(); }, 150);
+});
+
+medir();
 cargar();
 setInterval(cargar, SONDEO_MS);
 </script>

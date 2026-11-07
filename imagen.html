@@ -26,26 +26,10 @@
   #pie.visible { opacity: 0.85; }
   .punto { width: 10px; height: 10px; border-radius: 50%; }
   #estado {
-    position: absolute; right: 14px; bottom: 10px; display: none;
-    font: 12px/1.4 ui-monospace, Menlo, monospace; color: #666;
+    position: absolute; right: 14px; bottom: 10px;
+    font: 12px/1.4 'Droid Sans Mono', ui-monospace, monospace; color: #666;
   }
-  body.con-estado #estado { display: block; }
-  /* contador con el mismo lenguaje que el de voces de la galaxia */
-  #contador {
-    position: absolute; top: 1.8rem; right: 1.8rem; text-align: right;
-    font-family: 'Droid Sans Mono', ui-monospace, monospace; z-index: 2;
-  }
-  body.sin-contador #contador { display: none; }
-  #n-imagenes { font-size: 38px; font-weight: 300; color: #888; line-height: 1; transition: color 1.2s; }
-  #n-imagenes.sube { color: #ddd; transition: color 0.15s; }
-  .n-label { font-size: 9px; color: #444; letter-spacing: 0.2em; margin-top: 3px; }
-  #en-creacion { font-size: 9px; color: #666; letter-spacing: 0.2em; margin-top: 10px; opacity: 0; transition: opacity 1s; }
-  #en-creacion.visible { opacity: 1; }
-  #en-creacion .pulso {
-    display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: #9A8CFF;
-    margin-right: 7px; vertical-align: 1px; animation: latido 1.8s ease-in-out infinite;
-  }
-  @keyframes latido { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+  body.sin-estado #estado { display: none; }
 </style>
 </head>
 <body>
@@ -53,11 +37,6 @@
 <div class="capa" id="capa1"><img alt=""></div>
 <div id="pie"></div>
 <div id="estado"></div>
-<div id="contador">
-  <div id="n-imagenes">-</div>
-  <div class="n-label">IMÁGENES</div>
-  <div id="en-creacion"><span class="pulso"></span><span id="n-creacion">0</span> EN CREACIÓN</div>
-</div>
 <script>
 // ============================================================
 // Monitor de imágenes de Espéculo(ar)
@@ -73,12 +52,11 @@
 //   ?ciclo=15      segundos por imagen en el ciclo
 //   ?nueva=45      segundos que se muestra una imagen recién llegada
 //   ?fundido=2.5   segundos del fundido entre imágenes
-//   ?contador=0    oculta el contador de la esquina
 //   ?sondeo=10     cada cuántos segundos consulta al servidor
 //   ?ajuste=cubrir llena la pantalla recortando (por defecto, imagen completa)
 //   ?movimiento=1  acercamiento lento durante cada imagen
-//   ?pie=1         puntos con los colores de las categorías del relato
-//   ?estado=1      línea de estado abajo a la derecha (para el montaje)
+//   ?pie=0         oculta los puntos con los colores de las categorías del relato
+//   ?estado=0      oculta la línea abajo a la derecha (imágenes y cola)
 //   ?recarga=12    horas entre recargas preventivas de la página
 //   ?servidor=URL  otro servidor (pruebas)
 
@@ -107,9 +85,8 @@ document.documentElement.style.setProperty('--fundido', FUNDIDO_MS + 'ms');
 document.documentElement.style.setProperty('--ciclo', (CICLO_MS + FUNDIDO_MS) + 'ms');
 if (parametros.get('ajuste') === 'cubrir') document.body.classList.add('cubrir');
 if (parametros.get('movimiento') === '1') document.body.classList.add('movimiento');
-if (parametros.get('estado') === '1') document.body.classList.add('con-estado');
-if (parametros.get('contador') === '0') document.body.classList.add('sin-contador');
-const CON_PIE = parametros.get('pie') === '1';
+if (parametros.get('estado') === '0') document.body.classList.add('sin-estado');
+const CON_PIE = parametros.get('pie') !== '0';
 
 // ---------- estado ----------
 const imagenes = new Map();   // id -> {id, url, colores, reciente}
@@ -130,22 +107,6 @@ const cargadaEn = Date.now();
 const capas = [document.getElementById('capa0'), document.getElementById('capa1')];
 const pie = document.getElementById('pie');
 const lineaEstado = document.getElementById('estado');
-const nImagenes = document.getElementById('n-imagenes');
-const enCreacion = document.getElementById('en-creacion');
-const nCreacion = document.getElementById('n-creacion');
-let totalMostrado = null;
-
-function pintarContador() {
-  const total = imagenes.size;
-  if (totalMostrado !== null && total > totalMostrado) {
-    nImagenes.classList.add('sube');
-    setTimeout(() => nImagenes.classList.remove('sube'), 400);
-  }
-  totalMostrado = total;
-  nImagenes.textContent = total;
-  nCreacion.textContent = pendientesServidor;
-  enCreacion.classList.toggle('visible', pendientesServidor > 0);
-}
 
 function barajar(lista) {
   const a = lista.slice();
@@ -209,7 +170,6 @@ async function sondear() {
   } catch (e) {
     if (!sinConexionDesde) sinConexionDesde = Date.now();
   }
-  pintarContador();
   pintarEstado();
 }
 
@@ -300,10 +260,9 @@ function pintarPie(datos) {
 }
 
 function pintarEstado() {
-  if (!document.body.classList.contains('con-estado')) return;
-  const partes = [`${imagenes.size} imágenes`];
+  if (document.body.classList.contains('sin-estado')) return;
+  const partes = [`${imagenes.size} ${imagenes.size === 1 ? 'imagen' : 'imágenes'}`];
   if (pendientesServidor) partes.push(`${pendientesServidor} en cola`);
-  if (mostrandoNueva) partes.push('nueva');
   if (sinConexionDesde) partes.push(`sin conexión hace ${Math.round((Date.now() - sinConexionDesde) / 1000)} s`);
   lineaEstado.textContent = partes.join(' / ');
 }

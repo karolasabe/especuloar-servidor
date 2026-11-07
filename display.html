@@ -20,11 +20,11 @@
     display: flex; flex-direction: column; justify-content: space-between;
   }
   .header-bar { display: flex; justify-content: space-between; align-items: flex-start; }
-  .titulo { font-size: 11px; letter-spacing: 0.2em; color: #555; }
-  .subtitulo { font-size: 10px; letter-spacing: 0.1em; color: #333; margin-top: 5px; }
+  .titulo { font-size: 11px; color: #555; }
+  .subtitulo { font-size: 10px; color: #333; margin-top: 5px; }
   .contador { text-align: right; }
   .n-respuestas { font-size: 38px; font-weight: 300; color: #888; line-height: 1; }
-  .n-label { font-size: 9px; color: #444; letter-spacing: 0.2em; margin-top: 3px; }
+  .n-label { font-size: 9px; color: #444; margin-top: 3px; }
 
   .footer-bar { display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 0.8rem; }
   .controles-obra { display: flex; align-items: flex-end; gap: 0.55rem; pointer-events: auto; }
@@ -177,7 +177,7 @@
   }
   .leyenda-item {
     display: flex; align-items: center; gap: 6px;
-    font-size: 9px; color: #777; letter-spacing: 0.04em;
+    font-size: 9px; color: #777;
     cursor: pointer; user-select: none; padding: 3px 2px;
     transition: opacity 0.25s, color 0.25s;
   }
@@ -186,7 +186,7 @@
   .leyenda-dot { width: 8px; height: 8px; border-radius: 50%; transition: opacity 0.25s; flex-shrink: 0; }
   .leyenda-idioma {
     display: flex; align-items: center; gap: 4px;
-    font-size: 9px; color: #444; letter-spacing: 0.08em;
+    font-size: 9px; color: #444;
     padding: 3px 2px; margin-left: auto;
   }
   .leyenda-idioma button {
@@ -200,12 +200,12 @@
   .estado { text-align: right; }
   .estado-dot { width: 5px; height: 5px; border-radius: 50%; background: #1a1a1a; display: inline-block; margin-right: 5px; vertical-align: middle; }
   .estado-dot.vivo { background: #1D9E75; box-shadow: 0 0 6px rgba(29,158,117,0.5); }
-  .estado-texto { font-size: 9px; color: #444; letter-spacing: 0.12em; }
+  .estado-texto { font-size: 9px; color: #444; }
 
   .zoom-hint {
     position: fixed; bottom: 3.35rem; left: 50%;
     transform: translateX(-50%);
-    font-size: 9px; color: rgba(180,160,140,0.38); letter-spacing: 0.15em;
+    font-size: 9px; color: rgba(180,160,140,0.38);
     pointer-events: none; z-index: 3;
   }
 
@@ -224,19 +224,18 @@
     font-size: 13.5px; line-height: 1.75; position: relative;
   }
   .modal-categorias { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 1.4rem; }
-  .modal-cat-chip { font-size: 9.5px; padding: 3px 9px; border-radius: 10px; color: #fff; letter-spacing: 0.04em; }
+  .modal-cat-chip { font-size: 9.5px; padding: 3px 9px; border-radius: 10px; color: #fff; }
   .modal-relato { white-space: pre-wrap; color: #d8d8d8; font-family: 'Droid Serif', Georgia, serif; font-size: 1.06em; }
   .modal-cerrar {
     position: absolute; top: 1rem; right: 1.4rem;
     background: transparent; border: none; color: #555;
-    font-size: 11px; cursor: pointer; font-family: inherit; letter-spacing: 0.1em;
+    font-size: 11px; cursor: pointer; font-family: inherit;
   }
   .modal-cerrar:hover { color: #ccc; }
   .modal-traducir {
     display: none; margin-top: 1.4rem;
     background: none; border: none;
-    color: rgba(255,255,255,0.28); font-size: 9px;
-    letter-spacing: 0.14em; cursor: pointer;
+    color: rgba(255,255,255,0.28); font-size: 9px; cursor: pointer;
     font-family: 'Droid Sans Mono', ui-monospace, monospace;
     padding: 0; transition: color 0.2s;
   }
@@ -2545,8 +2544,7 @@ if (MODO_PROYECCION) {
   indicador.style.cssText = `
     position: fixed; bottom: 1.8rem; right: 1.8rem; z-index: 99;
     display: flex; align-items: center; gap: 7px;
-    font-family: 'Droid Sans Mono', ui-monospace, monospace; font-size: 9px;
-    letter-spacing: 0.12em; color: #444; pointer-events: none;
+    font-family: 'Droid Sans Mono', ui-monospace, monospace; font-size: 9px; color: #444; pointer-events: none;
   `;
   indicador.innerHTML = `
     <span id="gs-dot" style="width:5px;height:5px;border-radius:50%;

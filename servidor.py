@@ -2590,35 +2590,75 @@ def _segundos_desde(iso):
         return None
 
 
+_palabras_cache = {}
+
+
+def palabras_del_relato(respuesta_id, texto, maximo=8):
+    """Palabras del diccionario tal como quedaron escritas en el relato
+    (con sus tildes y su flexión: "fría", "metálicos"), en el orden en que
+    aparecen, cada una con su categoría. Se calcula una vez por relato y
+    versión del diccionario."""
+    clave = (respuesta_id, VERSION_DICCIONARIO)
+    if clave in _palabras_cache:
+        return _palabras_cache[clave]
+    original = (texto or '').lower()
+    normalizado = quitar_tildes(original)
+    # quitar_tildes conserva el largo en el español habitual; si no, se usa
+    # la entrada del diccionario en vez del recorte del texto original.
+    mismo_largo = len(normalizado) == len(original)
+    encontradas = {}
+    for cat, patrones in _PATRONES_CATEGORIA.items():
+        for entrada, patron in patrones:
+            m = patron.search(normalizado)
+            if not m:
+                continue
+            palabra = original[m.start():m.end()] if mismo_largo else entrada
+            if palabra not in encontradas or m.start() < encontradas[palabra][0]:
+                encontradas[palabra] = (m.start(), cat)
+    orden = sorted(encontradas.items(), key=lambda x: x[1][0])[:maximo]
+    resultado = [{'texto': p, 'categoria': cat} for p, (_, cat) in orden]
+    if len(_palabras_cache) > 5000:
+        _palabras_cache.clear()
+    _palabras_cache[clave] = resultado
+    return resultado
+
+
 @app.route('/imagenes', methods=['GET'])
 def listar_imagenes():
-    """Imágenes listas para el monitor, sin ocultas."""
+    """Imágenes listas para el monitor y la galería, sin ocultas.
+    Con ?palabras=1 agrega las palabras de cada relato (para la galería)."""
+    con_palabras = request.args.get('palabras') == '1'
     conn = get_conn()
     c = conn.cursor()
-    c.execute('''SELECT i.id, i.respuesta_id, i.generada, r.timestamp, r.categorias_activadas
+    c.execute('''SELECT i.id, i.respuesta_id, i.generada, r.timestamp, r.categorias_activadas,
+        CASE WHEN %s THEN r.relato ELSE NULL END
         FROM imagenes i JOIN respuestas r ON r.id = i.respuesta_id
-        WHERE i.estado = 'lista' ORDER BY i.respuesta_id''')
+        WHERE i.estado = 'lista' ORDER BY i.respuesta_id''', (con_palabras,))
     filas = c.fetchall()
     c.execute("SELECT estado, COUNT(*) FROM imagenes GROUP BY estado")
     conteo = dict(c.fetchall())
     conn.close()
     imagenes = []
-    for imagen_id, rid, generada, ts_relato, cats in filas:
+    for imagen_id, rid, generada, ts_relato, cats, relato in filas:
         try:
             categorias = json.loads(cats or '[]')
         except ValueError:
             categorias = []
         edad = _segundos_desde(ts_relato)
-        imagenes.append({
+        item = {
             'id': imagen_id,
             'respuesta_id': rid,
             'url': f'/imagen/{imagen_id}?v={hashlib.sha1((generada or "").encode()).hexdigest()[:10]}',
             'generada': generada,
+            'fecha': ts_relato,
             'edad_relato_s': edad,
             'reciente': edad is not None and edad < IMAGEN_RECIENTE_SEGUNDOS,
             'colores': [CATEGORIAS.get(k, {}).get('color', '#888') for k in categorias],
             'categorias': categorias,
-        })
+        }
+        if con_palabras:
+            item['palabras'] = palabras_del_relato(rid, relato)
+        imagenes.append(item)
     return jsonify({
         'imagenes': imagenes,
         'pendientes': conteo.get('pendiente', 0),
