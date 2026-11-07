@@ -5,9 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Espéculo(ar) - imagen</title>
 <style>
-  /* Droid Sans Mono, alojada en el
-     repositorio. Licencia Apache 2.0: ver LICENCIA_FUENTES_DROID.txt */
-  @font-face { font-family: 'Droid Sans Mono'; src: url('DroidSansMono.woff2') format('woff2'); font-display: swap; }
+  /* Roboto Light (300) y Regular (400), alojadas en el repositorio.
+     Licencia SIL Open Font License 1.1: ver LICENCIA_FUENTE_ROBOTO.txt */
+  @font-face { font-family: 'Roboto'; font-weight: 300; src: url('Roboto-Light.woff2') format('woff2'); font-display: swap; }
+  @font-face { font-family: 'Roboto'; font-weight: 400; src: url('Roboto-Regular.woff2') format('woff2'); font-display: swap; }
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; cursor: none; }
   .capa {
     position: absolute; inset: 0;
@@ -27,7 +28,7 @@
   .punto { width: 10px; height: 10px; border-radius: 50%; }
   #estado {
     position: absolute; right: 14px; bottom: 10px;
-    font: 12px/1.4 'Droid Sans Mono', ui-monospace, monospace; color: #666;
+    font: 400 12px/1.4 'Roboto', system-ui, sans-serif; color: #666;
   }
   body.sin-estado #estado { display: none; }
 </style>

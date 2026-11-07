@@ -79,6 +79,9 @@ IMAGEN_MODELO_REPLICATE = os.environ.get(
     'stability-ai/stable-diffusion:27b93a2413e7f36cd83da926f3656280b2931564ff050bf9575f1fdf9bcd7478')
 # Modelo de lenguaje para extraer conceptos y escribir el prompt.
 IMAGEN_MODELO_TEXTO = os.environ.get('IMAGEN_MODELO_TEXTO', 'claude-opus-5-5')
+# Frases cortas de cada relato para la galería (copiadas textualmente).
+FRASES_MODELO = os.environ.get('FRASES_MODELO', IMAGEN_MODELO_TEXTO)
+FRASES_MAX_DIA = int(os.environ.get('FRASES_MAX_DIA', '400'))
 IMAGEN_ESFUERZO = os.environ.get('IMAGEN_ESFUERZO', 'low')
 # El codificador de texto de SD 1.5 (CLIP) lee 77 tokens; lo que sigue se pierde.
 IMAGEN_PROMPT_MAX_PALABRAS = int(os.environ.get('IMAGEN_PROMPT_MAX_PALABRAS', '60'))
@@ -1645,6 +1648,18 @@ def init_db():
     )''')
     c.execute('''CREATE INDEX IF NOT EXISTS imagenes_estado
         ON imagenes (estado)''')
+    # Frases cortas de cada relato, elegidas por Claude y comprobadas como
+    # textuales, para la galería.
+    c.execute('''CREATE TABLE IF NOT EXISTS frases (
+        respuesta_id INTEGER PRIMARY KEY,
+        estado TEXT NOT NULL DEFAULT 'procesando',
+        datos TEXT,
+        modelo TEXT,
+        intentos INTEGER NOT NULL DEFAULT 0,
+        error TEXT,
+        inicio TEXT,
+        creada TEXT
+    )''')
     # Consumo diario de APIs pagadas (para el tope y para revisar gastos).
     c.execute('''CREATE TABLE IF NOT EXISTS consumo (
         dia TEXT NOT NULL,
@@ -1987,9 +2002,10 @@ class ErrorImagen(Exception):
 class ErrorCuenta(ErrorImagen):
     """Falla de la cuenta (token, crédito, límite de uso), no del relato:
     detiene la cola entera un rato en vez de gastar intentos en cada relato."""
-    def __init__(self, mensaje, espera=900):
+    def __init__(self, mensaje, espera=900, servicio='replicate'):
         super().__init__(mensaje)
         self.espera = espera
+        self.servicio = servicio
 
 
 # Contador del tope diario: solo predicciones que Replicate aceptó (las que cobra).
@@ -2021,12 +2037,12 @@ def _latido():
         log.exception('imagenes: no se pudo registrar el latido')
 
 
-def _bloquear(mensaje, espera):
+def _bloquear(mensaje, espera, servicio='replicate'):
     conn = get_conn()
     c = conn.cursor()
     hasta = datetime.fromtimestamp(_ahora().timestamp() + espera).isoformat()
-    _escribir_config(c, 'imagenes_bloqueo', json.dumps({'mensaje': mensaje, 'hasta': hasta},
-                                                       ensure_ascii=False))
+    _escribir_config(c, 'imagenes_bloqueo', json.dumps(
+        {'mensaje': mensaje, 'hasta': hasta, 'servicio': servicio}, ensure_ascii=False))
     conn.commit()
     conn.close()
 
@@ -2092,15 +2108,16 @@ def _escribir_config(c, clave, valor):
 
 
 # ---------- llamadas a Anthropic ----------
-def _claude(sistema, contenido, max_tokens=1024):
+def _claude(sistema, contenido, max_tokens=1024, modelo=None):
     """Devuelve el texto de la respuesta o lanza ErrorImagen."""
+    modelo = modelo or IMAGEN_MODELO_TEXTO
     cuerpo = {
-        'model': IMAGEN_MODELO_TEXTO,
+        'model': modelo,
         'max_tokens': max_tokens,
         'system': sistema,
         'messages': [{'role': 'user', 'content': contenido}],
     }
-    if IMAGEN_ESFUERZO and _modelo_usa_esfuerzo(IMAGEN_MODELO_TEXTO):
+    if IMAGEN_ESFUERZO and _modelo_usa_esfuerzo(modelo):
         cuerpo['output_config'] = {'effort': IMAGEN_ESFUERZO}
     req = urllib.request.Request(
         ANTHROPIC_API_URL,
@@ -2118,11 +2135,11 @@ def _claude(sistema, contenido, max_tokens=1024):
         except Exception:
             detalle = ''
         if e.code in (401, 403):
-            raise ErrorCuenta(f'anthropic {e.code}: clave de API inválida o sin permiso')
+            raise ErrorCuenta(f'anthropic {e.code}: clave de API inválida o sin permiso', servicio='anthropic')
         if e.code == 429:
-            raise ErrorCuenta('anthropic 429: límite de uso, se reintenta en unos minutos', espera=180)
+            raise ErrorCuenta('anthropic 429: límite de uso, se reintenta en unos minutos', espera=180, servicio='anthropic')
         if 'credit balance' in detalle.lower():
-            raise ErrorCuenta('anthropic: sin crédito en la cuenta de la Console')
+            raise ErrorCuenta('anthropic: sin crédito en la cuenta de la Console', servicio='anthropic')
         raise ErrorImagen(f'anthropic HTTP {e.code} {detalle}')
     except Exception as e:
         raise ErrorImagen(f'anthropic {type(e).__name__}')
@@ -2524,12 +2541,145 @@ def procesar_imagen(trabajo):
             intentos = GREATEST(intentos - 1, 0) WHERE id = %s''', (str(e)[:500], imagen_id))
         conn.commit()
         conn.close()
-        _bloquear(str(e), e.espera)
+        _bloquear(str(e), e.espera, e.servicio)
         return 'bloqueo'
     except ErrorImagen as e:
         log.warning('imagenes: relato %s, intento %s: %s', respuesta_id, intentos, e)
         _registrar_fallo(imagen_id, intentos, str(e))
         return 'fallo'
+
+# ---------- frases cortas para la galería ----------
+# Claude elige hasta dos frases breves de cada relato, las más significativas
+# de la experiencia que cuenta. Solo se guardan si aparecen textualmente en el
+# relato: si el modelo cambió una palabra, la frase se descarta.
+_PROMPT_FRASES = (
+    'Del relato que está entre etiquetas <relato>, elige hasta dos frases cortas, de entre 3 y 12 '
+    'palabras, copiadas textualmente: sin cambiar, quitar ni agregar palabras y con la misma '
+    'ortografía. Deben ser las más significativas de la experiencia que el relato cuenta. No elijas '
+    'frases que contengan nombres de personas, instituciones o lugares, ni datos que permitan '
+    'identificar a alguien. Asigna a cada frase un peso del 1 al 5, donde 5 es la más significativa. '
+    'Devuelve SOLO un JSON con la forma {"frases": [{"texto": "...", "peso": 5}]}, sin explicaciones.'
+)
+
+
+def _espacios(texto):
+    return ' '.join((texto or '').split())
+
+
+def frase_textual(frase, relato):
+    """Devuelve la frase tal como aparece en el relato, o None si no está."""
+    buscada = _espacios(frase).strip(' "\'“”«»')
+    fuente = _espacios(relato)
+    if not buscada:
+        return None
+    i = fuente.find(buscada)
+    if i < 0:
+        i = fuente.lower().find(buscada.lower())
+    if i < 0:
+        return None
+    return fuente[i:i + len(buscada)]
+
+
+def extraer_frases(relato):
+    relato = (relato or '')[:TRADUCCION_MAX_CARACTERES]
+    texto = _claude(_SISTEMA_IMAGEN, f'{_PROMPT_FRASES}\n\n<relato>\n{relato}\n</relato>',
+                    max_tokens=500, modelo=FRASES_MODELO)
+    try:
+        propuestas = _json_de_respuesta(texto).get('frases', [])
+    except Exception:
+        raise ErrorImagen('frases: respuesta sin JSON válido')
+    frases = []
+    for p in propuestas if isinstance(propuestas, list) else []:
+        if not isinstance(p, dict):
+            continue
+        original = frase_textual(str(p.get('texto', '')), relato)
+        if not original or not 3 <= len(original.split()) <= 14:
+            continue
+        try:
+            peso = max(1, min(5, int(p.get('peso', 3))))
+        except (TypeError, ValueError):
+            peso = 3
+        if all(f['texto'] != original for f in frases):
+            frases.append({'texto': original, 'peso': peso})
+    return frases[:2]
+
+
+def _reclamar_frase(c):
+    """Toma un relato con imagen lista y sin frases (o con un intento
+    fallido hace más de media hora). Los más nuevos primero."""
+    ahora = _ahora()
+    hace_media_hora = datetime.fromtimestamp(ahora.timestamp() - 1800).isoformat()
+    hace_15_min = datetime.fromtimestamp(ahora.timestamp() - 900).isoformat()
+    c.execute("""UPDATE frases SET estado = 'fallida'
+        WHERE estado = 'procesando' AND inicio < %s""", (hace_15_min,))
+    c.execute("""INSERT INTO frases (respuesta_id, estado, intentos, inicio)
+        SELECT i.respuesta_id, 'procesando', 1, %s FROM imagenes i
+        WHERE i.estado = 'lista'
+          AND NOT EXISTS (SELECT 1 FROM frases f WHERE f.respuesta_id = i.respuesta_id)
+        ORDER BY i.respuesta_id DESC LIMIT 1
+        ON CONFLICT (respuesta_id) DO NOTHING
+        RETURNING respuesta_id""", (ahora.isoformat(),))
+    fila = c.fetchone()
+    if fila:
+        return fila[0]
+    c.execute("""UPDATE frases SET estado = 'procesando', intentos = intentos + 1, inicio = %s
+        WHERE respuesta_id = (
+            SELECT respuesta_id FROM frases
+            WHERE estado = 'fallida' AND intentos < 3 AND inicio < %s
+            ORDER BY respuesta_id DESC LIMIT 1 FOR UPDATE SKIP LOCKED)
+        RETURNING respuesta_id""", (ahora.isoformat(), hace_media_hora))
+    fila = c.fetchone()
+    return fila[0] if fila else None
+
+
+def procesar_frase_pendiente():
+    """Extrae las frases de un relato. Devuelve 'lista', 'fallo', 'bloqueo'
+    o None si no había nada que hacer."""
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        if _imagenes_en_pausa(c):
+            return None
+        bloqueo = _bloqueo_vigente(c)
+        if bloqueo and bloqueo.get('servicio') == 'anthropic':
+            return 'bloqueo'
+        if _consumo_hoy(c, 'anthropic_frases') >= FRASES_MAX_DIA:
+            return None
+        rid = _reclamar_frase(c)
+        conn.commit()
+        if rid is None:
+            return None
+        c.execute('SELECT relato FROM respuestas WHERE id = %s', (rid,))
+        fila = c.fetchone()
+    finally:
+        conn.close()
+    if not fila:
+        conn = get_conn()
+        conn.cursor().execute('DELETE FROM frases WHERE respuesta_id = %s', (rid,))
+        conn.commit()
+        conn.close()
+        return None
+    _sumar_consumo('anthropic_frases')
+    try:
+        frases = extraer_frases(fila[0])
+        estado, datos, error, resultado = 'lista', json.dumps(frases, ensure_ascii=False), None, 'lista'
+    except ErrorCuenta as e:
+        _bloquear(str(e), e.espera, e.servicio)
+        conn = get_conn()
+        conn.cursor().execute('DELETE FROM frases WHERE respuesta_id = %s', (rid,))
+        conn.commit()
+        conn.close()
+        return 'bloqueo'
+    except ErrorImagen as e:
+        estado, datos, error, resultado = 'fallida', None, str(e)[:300], 'fallo'
+        log.warning('frases: relato %s: %s', rid, e)
+    conn = get_conn()
+    conn.cursor().execute("""UPDATE frases SET estado = %s, datos = %s, error = %s, modelo = %s,
+        creada = %s WHERE respuesta_id = %s""",
+        (estado, datos, error, FRASES_MODELO, _ahora().isoformat(), rid))
+    conn.commit()
+    conn.close()
+    return resultado
 
 
 def _bucle_imagenes():
@@ -2549,6 +2699,9 @@ def _bucle_imagenes():
                 if trabajo == 'cupo' and aviso_cupo != _ahora().date():
                     log.warning('imagenes: se alcanzó el tope diario de %s imágenes', IMAGEN_MAX_DIA)
                     aviso_cupo = _ahora().date()
+                # sin imágenes que generar, se adelantan las frases de la galería
+                if procesar_frase_pendiente() in ('lista', 'fallo'):
+                    continue
                 _evento_imagenes.wait(15 if trabajo is None else 60)
                 _evento_imagenes.clear()
                 continue
@@ -2631,15 +2784,17 @@ def listar_imagenes():
     conn = get_conn()
     c = conn.cursor()
     c.execute('''SELECT i.id, i.respuesta_id, i.generada, r.timestamp, r.categorias_activadas,
-        CASE WHEN %s THEN r.relato ELSE NULL END
+        CASE WHEN %s THEN r.relato ELSE NULL END,
+        CASE WHEN %s THEN f.datos ELSE NULL END
         FROM imagenes i JOIN respuestas r ON r.id = i.respuesta_id
-        WHERE i.estado = 'lista' ORDER BY i.respuesta_id''', (con_palabras,))
+        LEFT JOIN frases f ON f.respuesta_id = i.respuesta_id AND f.estado = 'lista'
+        WHERE i.estado = 'lista' ORDER BY i.respuesta_id''', (con_palabras, con_palabras))
     filas = c.fetchall()
     c.execute("SELECT estado, COUNT(*) FROM imagenes GROUP BY estado")
     conteo = dict(c.fetchall())
     conn.close()
     imagenes = []
-    for imagen_id, rid, generada, ts_relato, cats, relato in filas:
+    for imagen_id, rid, generada, ts_relato, cats, relato, frases_json in filas:
         try:
             categorias = json.loads(cats or '[]')
         except ValueError:
@@ -2658,6 +2813,10 @@ def listar_imagenes():
         }
         if con_palabras:
             item['palabras'] = palabras_del_relato(rid, relato)
+            try:
+                item['frases'] = json.loads(frases_json) if frases_json else []
+            except ValueError:
+                item['frases'] = []
         imagenes.append(item)
     return jsonify({
         'imagenes': imagenes,
@@ -2733,6 +2892,8 @@ def estado_imagenes():
     replicate_hoy = _consumo_hoy(c, SERVICIO_REPLICATE)
     anthropic_hoy = _consumo_hoy(c, 'anthropic')
     latido = _leer_config(c, 'imagenes_latido')
+    c.execute("SELECT estado, COUNT(*) FROM frases GROUP BY estado")
+    frases_conteo = dict(c.fetchall())
     # Último error registrado (mensajes propios del servidor: códigos HTTP y
     # explicaciones; no incluyen claves ni texto de los relatos).
     c.execute('''SELECT respuesta_id, error, inicio FROM imagenes
@@ -2753,6 +2914,7 @@ def estado_imagenes():
         'imagenes_hoy': replicate_hoy,
         'tope_diario': IMAGEN_MAX_DIA,
         'llamadas_claude_hoy': anthropic_hoy,
+        'frases_por_estado': frases_conteo,
         'ultimo_error': ({'relato': fila_error[0], 'error': fila_error[1], 'cuando': fila_error[2]}
                          if fila_error else None),
         'modelo_imagen': IMAGEN_MODELO_REPLICATE,
@@ -3076,6 +3238,7 @@ def reiniciar():
     c.execute('DELETE FROM pintitas')
     c.execute('DELETE FROM traducciones')
     c.execute('DELETE FROM imagenes')
+    c.execute('DELETE FROM frases')
     conn.commit()
     conn.close()
     return jsonify({'status': 'ok', 'mensaje': 'corpus reiniciado'})
