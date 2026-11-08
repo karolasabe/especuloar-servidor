@@ -99,6 +99,13 @@ IMAGEN_PARAMETROS = {
 # quality empujaban al modelo hacia imágenes pulidas y fuera de la crudeza de
 # los relatos.
 IMAGEN_NEGATIVE_PROMPT = os.environ.get('IMAGEN_NEGATIVE_PROMPT', 'text, watermark, signature')
+# Sin texto simulado: el modelo tiende a escribir letras ilegibles y a armar
+# afiches. Se le pide evitarlo y, si igual aparece, la imagen se descarta.
+IMAGEN_SIN_TEXTO = os.environ.get('IMAGEN_SIN_TEXTO', '1') == '1'
+IMAGEN_NEGATIVE_SIN_TEXTO = os.environ.get(
+    'IMAGEN_NEGATIVE_SIN_TEXTO',
+    'text, letters, words, writing, typography, caption, sign, poster, banner, placard, '
+    'watermark, signature')
 # Cómo se arma el prompt:
 #   'relato' (por omisión): el modelo recibe el relato tal como llegó, sin
 #     extracción, sin plantilla, sin línea de estilo y sin negative prompt.
@@ -125,17 +132,21 @@ _SISTEMA_MENORES = (
     'Revisas imágenes generadas automáticamente para una obra de arte sobre experiencias '
     'ginecológicas. Tu única tarea es detectar material de abuso sexual infantil.')
 _PEDIDO_MENORES = (
-    'Revisa la imagen en dos pasos. Primero: ¿hay en la imagen desnudez total o parcial, '
-    'genitales, pecho, nalgas u otras partes íntimas expuestas o visibles, una escena de '
-    'violencia sexual (como una violación o un abuso), un acto sexual o una pose '
-    'explícitamente pornográfica? Si no hay nada de eso, responde descartar = false, aunque '
-    'aparezcan niñas o niños vestidos, multitudes, rostros o escenas perturbadoras. '
-    'Segundo, solo si hay algo de lo anterior: responde descartar = true si la persona '
-    'involucrada aparenta ser menor de 18 años o si no puedes determinar su edad. '
-    'Violencia sin contenido sexual, sangre, carne, anatomía y desnudez de personas '
-    'claramente adultas no son motivo para descartar. Responde SOLO un JSON '
-    '{"descartar": true o false, "motivo": "una frase breve que describa lo que ves, sin '
-    'detalles gráficos"}.')
+    'Revisa la imagen y responde dos preguntas independientes.\n'
+    'A) Protección de menores, en dos pasos. Primero: ¿hay en la imagen desnudez total o '
+    'parcial, genitales, pecho, nalgas u otras partes íntimas expuestas o visibles, una escena '
+    'de violencia sexual (como una violación o un abuso), un acto sexual o una pose '
+    'explícitamente pornográfica? Si no hay nada de eso, descartar = false, aunque aparezcan '
+    'niñas o niños vestidos, multitudes, rostros o escenas perturbadoras. Segundo, solo si hay '
+    'algo de lo anterior: descartar = true si la persona involucrada aparenta ser menor de 18 '
+    'años o si no puedes determinar su edad. Violencia sin contenido sexual, sangre, carne, '
+    'anatomía y desnudez de personas claramente adultas no son motivo para descartar.\n'
+    'B) Texto: texto = true si en la imagen se ven letras, palabras o seudoletras de forma '
+    'notoria (carteles, pancartas, afiches, titulares, rótulos, grafitis, texto sobre la '
+    'imagen) o si la imagen está compuesta como un afiche. Marcas mínimas o ilegibles en un '
+    'objeto pequeño del fondo no cuentan.\n'
+    'Responde SOLO un JSON {"descartar": true o false, "motivo": "una frase breve que '
+    'describa lo que ves, sin detalles gráficos", "texto": true o false}.')
 # Tope diario de llamadas a Replicate: protege el presupuesto si llegan
 # envíos masivos mientras nadie mira.
 IMAGEN_MAX_DIA = int(os.environ.get('IMAGEN_MAX_DIA', '300'))
@@ -2439,9 +2450,10 @@ def estado_filtro_modelo():
     return 'desactivado' if 'disable_safety_checker' in campos else 'activo'
 
 
-def revisar_menores(datos, mime):
-    """Devuelve True si la imagen debe descartarse. Ante cualquier duda
-    (respuesta ilegible, error), la imagen no se guarda."""
+def revisar_imagen(datos, mime):
+    """Una sola consulta revisa la protección de menores y el texto simulado.
+    Devuelve (menores, texto). Ante cualquier duda (respuesta ilegible,
+    error), la imagen no se guarda."""
     contenido = [
         {'type': 'image', 'source': {'type': 'base64', 'media_type': mime,
                                      'data': base64.b64encode(datos).decode('ascii')}},
@@ -2451,12 +2463,12 @@ def revisar_menores(datos, mime):
     try:
         datos_r = _json_de_respuesta(texto)
         descartar = bool(datos_r['descartar'])
+        con_texto = bool(datos_r.get('texto'))
     except Exception:
-        raise ErrorImagen('protección de menores: respuesta ilegible; la imagen no se guarda')
-    if descartar:
-        # El motivo queda registrado para revisar falsos positivos; la imagen no.
-        revisar_menores.ultimo_motivo = str(datos_r.get('motivo') or '')[:200]
-    return descartar
+        raise ErrorImagen('revisión de la imagen: respuesta ilegible; la imagen no se guarda')
+    # El motivo queda registrado para revisar falsos positivos; la imagen no.
+    revisar_imagen.ultimo_motivo = str(datos_r.get('motivo') or '')[:200]
+    return descartar, con_texto
 
 
 def _entrada_para_modelo(prompt, semilla):
@@ -2464,7 +2476,10 @@ def _entrada_para_modelo(prompt, semilla):
     registro de lo omitido para la trazabilidad."""
     entrada = dict(IMAGEN_PARAMETROS)
     entrada['prompt'] = prompt
-    if IMAGEN_MODO_PROMPT != 'relato' and IMAGEN_NEGATIVE_PROMPT.strip():
+    if IMAGEN_MODO_PROMPT == 'relato':
+        if IMAGEN_SIN_TEXTO and IMAGEN_NEGATIVE_SIN_TEXTO.strip():
+            entrada['negative_prompt'] = IMAGEN_NEGATIVE_SIN_TEXTO
+    elif IMAGEN_NEGATIVE_PROMPT.strip():
         entrada['negative_prompt'] = IMAGEN_NEGATIVE_PROMPT
     entrada['seed'] = semilla
     if IMAGEN_SIN_FILTRO_MODELO:
@@ -2725,10 +2740,14 @@ def procesar_imagen(trabajo):
             _actualizar_imagen(imagen_id, prompt=prompt, modelo_texto=IMAGEN_MODELO_TEXTO)
         semilla = secrets.randbelow(2 ** 31)
         resultado = generar_en_replicate(prompt, semilla)
-        if revisar_menores(resultado['datos'], resultado['mime']):
+        menores, con_texto = revisar_imagen(resultado['datos'], resultado['mime'])
+        if menores:
             _sumar_consumo('menores_descartadas')
             raise ErrorImagen('protección de menores: imagen descartada sin guardar ('
-                              + getattr(revisar_menores, 'ultimo_motivo', '') + '); se intenta con otra semilla')
+                              + revisar_imagen.ultimo_motivo + '); se intenta con otra semilla')
+        if con_texto and IMAGEN_SIN_TEXTO:
+            _sumar_consumo('texto_descartadas')
+            raise ErrorImagen('texto simulado en la imagen; se intenta con otra semilla')
         conn = get_conn()
         previa = _moderacion_previa(conn.cursor())
         conn.close()
@@ -3129,6 +3148,7 @@ def estado_imagenes():
     bloqueo = _bloqueo_vigente(c)
     replicate_hoy = _consumo_hoy(c, SERVICIO_REPLICATE)
     menores_hoy = _consumo_hoy(c, 'menores_descartadas')
+    texto_hoy = _consumo_hoy(c, 'texto_descartadas')
     previa = _moderacion_previa(c)
     al_ingles = _leer_config(c, 'traducir_al_ingles') == '1'
     anthropic_hoy = _consumo_hoy(c, 'anthropic')
@@ -3154,6 +3174,8 @@ def estado_imagenes():
         'moderacion_previa': previa,
         'traducir_al_ingles': al_ingles,
         'descartadas_proteccion_menores_hoy': menores_hoy,
+        'descartadas_texto_hoy': texto_hoy,
+        'sin_texto': IMAGEN_SIN_TEXTO,
         'detenido_por': bloqueo,
         'token_replicate': formato_token_replicate(),
         'por_estado': conteo,
@@ -3333,18 +3355,26 @@ def _procesar_comparaciones():
                 prompt = ' '.join(texto.split())[:IMAGEN_RELATO_MAX_CARACTERES]
                 campos['prompt'] = prompt
                 resultado = generar_en_replicate(prompt, semilla)
-                if revisar_menores(resultado['datos'], resultado['mime']):
+                menores, con_texto = revisar_imagen(resultado['datos'], resultado['mime'])
+                if menores:
                     _sumar_consumo('menores_descartadas')
                     campos.update(estado='descartada', error='protección de menores: '
-                                  + getattr(revisar_menores, 'ultimo_motivo', ''))
+                                  + revisar_imagen.ultimo_motivo)
                 else:
+                    # En la comparación la imagen con texto se muestra, marcada.
                     campos.update(estado='lista', datos=psycopg2.Binary(resultado['datos']),
-                                  mime=resultado['mime'], generada=_ahora().isoformat())
+                                  mime=resultado['mime'], generada=_ahora().isoformat(),
+                                  error='con texto: en la galería se descartaría' if con_texto else None)
             except ErrorCuenta as e:
                 _bloquear(str(e), e.espera, e.servicio)
                 campos.update(estado='pendiente', error=str(e)[:500])
             except ErrorImagen as e:
-                campos.update(estado='fallida', error=str(e)[:500])
+                if 'nsfw' in str(e).lower():
+                    # En la comparación no se cambia la semilla: el bloqueo es el resultado.
+                    campos.update(estado='bloqueada',
+                                  error='bloqueada por el filtro de contenido del modelo (misma semilla)')
+                else:
+                    campos.update(estado='fallida', error=str(e)[:500])
             conn = get_conn()
             c = conn.cursor()
             asignaciones = ', '.join(f'{k} = %s' for k in campos)

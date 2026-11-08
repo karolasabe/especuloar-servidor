@@ -213,9 +213,13 @@ function figura(f, titulo, pie) {
     foto = document.createElement('div');
     foto.className = 'foto';
     foto.textContent = !f ? '' : f.estado === 'descartada' ? (f.error || 'descartada por protección de menores')
+      : f.estado === 'bloqueada' ? (f.error || 'bloqueada por el filtro del modelo')
       : f.estado === 'fallida' ? (f.error || 'fallida') : 'generando...';
   }
   fig.appendChild(foto);
+  if (f && f.estado === 'lista' && f.error) {
+    const n = document.createElement('figcaption'); n.className = 'gris'; n.textContent = '(' + f.error + ')'; fig.appendChild(n);
+  }
   if (pie) { const c = document.createElement('figcaption'); c.textContent = pie; fig.appendChild(c); }
   return fig;
 }
@@ -255,7 +259,7 @@ function pintarControles() {
   $('v-cuentas').classList.toggle('alerta', porRevisar > 0);
   const filtro = { desactivado: 'desactivado', activo: 'activo (el modelo no permite apagarlo)', desconocido: 'sin confirmar' }[estado.filtro_modelo] || '...';
   $('v-detalle').textContent = `${pe.oculta || 0} ocultas, ${(pe.pendiente || 0) + (pe.generando || 0)} en cola, ${pe.fallida || 0} fallidas. `
-    + `Hoy: ${estado.imagenes_hoy || 0} de ${estado.tope_diario || 0} imágenes, ${estado.descartadas_proteccion_menores_hoy || 0} descartadas por protección de menores. `
+    + `Hoy: ${estado.imagenes_hoy || 0} de ${estado.tope_diario || 0} imágenes, ${estado.descartadas_proteccion_menores_hoy || 0} descartadas por protección de menores, ${estado.descartadas_texto_hoy || 0} por texto simulado. `
     + `Filtro del modelo: ${filtro}.`;
   for (const b of document.querySelectorAll('.vistas button')) b.setAttribute('aria-pressed', b.dataset.vista === vista);
 }
