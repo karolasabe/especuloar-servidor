@@ -103,7 +103,13 @@ IMAGEN_NEGATIVE_PROMPT = os.environ.get('IMAGEN_NEGATIVE_PROMPT', 'text, waterma
 # Una imagen con desnudez o contenido sexual de personas adultas, o con
 # letras simuladas en más que IMAGEN_TEXTO_MAX_PORCENTAJE de su superficie,
 # se guarda y pasa al panel de moderación ("por revisar") antes de publicarse.
-IMAGEN_NEGATIVE_SIN_TEXTO = os.environ.get('IMAGEN_NEGATIVE_SIN_TEXTO', '')
+# Lo único que se le indica al modelo junto al relato: evitar letras y texto
+# escrito (prompt negativo, que el modelo lee aparte, con sus propios 77
+# tokens; no le quita espacio al relato). Vacío = el relato entra solo.
+IMAGEN_NEGATIVE_SIN_TEXTO = os.environ.get(
+    'IMAGEN_NEGATIVE_SIN_TEXTO',
+    'text, letters, words, writing, handwriting, typography, font, caption, title, quote, '
+    'sign, poster, label, newspaper, book page, watermark, signature, logo')
 IMAGEN_TEXTO_MAX_PORCENTAJE = int(os.environ.get('IMAGEN_TEXTO_MAX_PORCENTAJE', '20'))
 # Sobre este tope la imagen es casi pura escritura simulada (una "cita" o
 # lámina de texto): no se guarda y se genera otra con otra semilla.
@@ -3165,6 +3171,7 @@ def listar_imagenes():
         'pendientes': conteo.get('pendiente', 0),
         'generando': conteo.get('generando', 0),
         'filtro_modelo': estado_filtro_modelo(),
+        'evita_letras': IMAGEN_MODO_PROMPT == 'relato' and bool(IMAGEN_NEGATIVE_SIN_TEXTO.strip()),
         'traducir_al_ingles': _traducir_para_modelo(),
     })
 
@@ -3283,6 +3290,7 @@ def estado_imagenes():
         'frases_por_estado': frases_conteo,
         'por_rehacer': por_rehacer,
         'filtro_modelo': estado_filtro_modelo(),
+        'evita_letras': IMAGEN_MODO_PROMPT == 'relato' and bool(IMAGEN_NEGATIVE_SIN_TEXTO.strip()),
         'modo_prompt': IMAGEN_MODO_PROMPT,
         'ultimo_error': ({'relato': fila_error[0], 'error': fila_error[1], 'cuando': fila_error[2]}
                          if fila_error else None),

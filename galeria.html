@@ -262,9 +262,10 @@ const SOBRE = {
   es: {
     boton: '(sobre las imágenes)', titulo: 'SOBRE LAS IMÁGENES',
     inicio: {
-      original: 'Cada imagen se generó automáticamente a partir de un relato. El texto entra tal como fue escrito, en su idioma, al modelo Stable Diffusion 1.5, sin edición ni instrucciones adicionales, y nadie elige ni retoca el resultado.',
-      ingles: 'Cada imagen se generó automáticamente a partir de un relato. El texto se traduce al inglés de forma literal y entra así al modelo Stable Diffusion 1.5, sin edición ni instrucciones adicionales, y nadie elige ni retoca el resultado.',
+      original: 'Cada imagen se generó automáticamente a partir de un relato. El texto entra tal como fue escrito, en su idioma, al modelo Stable Diffusion 1.5, sin edición, y nadie elige ni retoca el resultado.',
+      ingles: 'Cada imagen se generó automáticamente a partir de un relato. El texto se traduce al inglés de forma literal y entra así al modelo Stable Diffusion 1.5, sin edición, y nadie elige ni retoca el resultado.',
     },
+    letras: 'Lo único que se le indica al modelo, aparte del relato, es una lista de lo que debe evitar: letras, palabras y texto escrito.',
     parrafos: [
       'Ese modelo aprendió a vincular palabras e imágenes a partir de pares de imagen y texto recopilados de internet: fotografías, ilustraciones, publicidad, noticias y foros, junto a las descripciones que personas escribieron para ellas. Fue entrenado sobre subconjuntos de LAION-2B(en), la porción en inglés de LAION-5B, un conjunto de unos 5.850 millones de pares de imagen y texto extraídos de Common Crawl y seleccionados en parte por un modelo que puntúa la calidad estética. Lo que aparece en cada imagen viene de esas asociaciones humanas acumuladas en internet.',
     ],
@@ -280,9 +281,10 @@ const SOBRE = {
   en: {
     boton: '(about the images)', titulo: 'ABOUT THE IMAGES',
     inicio: {
-      original: 'Each image was generated automatically from a testimony. The text goes into the Stable Diffusion 1.5 model exactly as it was written, in its own language, with no editing or added instructions, and no one selects or retouches the result.',
-      ingles: 'Each image was generated automatically from a testimony. The text is translated literally into English and goes into the Stable Diffusion 1.5 model that way, with no editing or added instructions, and no one selects or retouches the result.',
+      original: 'Each image was generated automatically from a testimony. The text goes into the Stable Diffusion 1.5 model exactly as it was written, in its own language, with no editing, and no one selects or retouches the result.',
+      ingles: 'Each image was generated automatically from a testimony. The text is translated literally into English and goes into the Stable Diffusion 1.5 model that way, with no editing, and no one selects or retouches the result.',
     },
+    letras: 'The only thing the model is told, besides the testimony, is a list of what to avoid: letters, words and written text.',
     parrafos: [
       'The model learned to link words and images from image and text pairs collected from the internet: photographs, illustrations, advertising, news and forums, together with the descriptions people wrote for them. It was trained on subsets of LAION-2B(en), the English portion of LAION-5B, a set of about 5.85 billion image and text pairs extracted from Common Crawl and partly selected by a model that scores aesthetic quality. What appears in each image comes from those human associations accumulated on the internet.',
     ],
@@ -298,6 +300,7 @@ const SOBRE = {
 }[IDIOMA];
 let filtroModelo = 'activo';
 let idiomaModelo = 'original';
+let evitaLetras = false;
 
 function nombreCategoria(cat, idioma) {
   const info = CATEGORIAS[cat];
@@ -591,6 +594,7 @@ async function cargar(forzar) {
     datos = await res.json();
   } catch (e) { return; }
   if (datos.filtro_modelo === 'desactivado' || datos.filtro_modelo === 'activo') filtroModelo = datos.filtro_modelo;
+  if (typeof datos.evita_letras === 'boolean') evitaLetras = datos.evita_letras;
   if (typeof datos.traducir_al_ingles === 'boolean') idiomaModelo = datos.traducir_al_ingles ? 'ingles' : 'original';
   const lista = (datos.imagenes || []).slice().sort((a, b) => b.respuesta_id - a.respuesta_id);
   const seleccion = elegirFrases(lista);
@@ -801,7 +805,7 @@ document.getElementById('sobre-titulo').textContent = SOBRE.titulo;
 function pintarSobre() {
   const caja = document.getElementById('sobre-texto');
   caja.innerHTML = '';
-  for (const texto of [SOBRE.inicio[idiomaModelo], ...SOBRE.parrafos, SOBRE.lectura[idiomaModelo], SOBRE.filtro[filtroModelo]]) {
+  for (const texto of [SOBRE.inicio[idiomaModelo], ...(evitaLetras ? [SOBRE.letras] : []), ...SOBRE.parrafos, SOBRE.lectura[idiomaModelo], SOBRE.filtro[filtroModelo]]) {
     const p = document.createElement('p');
     p.textContent = texto;
     caja.appendChild(p);
