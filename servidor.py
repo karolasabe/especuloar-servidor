@@ -2536,8 +2536,9 @@ def generar_en_replicate(prompt, semilla):
         raise ErrorCuenta('replicate 402: falta crédito o medio de pago en la cuenta')
     if estado == 429:
         segundos = min(max((pred.get('_esperar') or 60) + 5, 30), 600)
-        raise ErrorCuenta(f'replicate 429: límite de solicitudes, se reintenta en {segundos} s',
-                          espera=segundos)
+        detalle = str(pred.get('detail') or pred.get('title') or '')[:160]
+        raise ErrorCuenta(f'replicate 429: límite de solicitudes, se reintenta en {segundos} s'
+                          + (f' (Replicate: {detalle})' if detalle else ''), espera=segundos)
     if estado not in (200, 201, 202):
         raise ErrorImagen(f"replicate HTTP {estado} {str(pred.get('detail', pred))[:200]}")
     # Si la espera de 60 s no alcanzó (arranque en frío), se consulta hasta 10 min.
