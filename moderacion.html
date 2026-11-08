@@ -87,6 +87,7 @@
       <div class="titulo">Estado</div>
       <div class="valor" id="v-cuentas">&nbsp;</div>
       <p id="v-detalle"></p>
+      <p><button id="b-registro" type="button">(descargar registro de bloqueos y revisiones)</button> <span id="v-registro"></span></p>
     </div>
   </section>
 
@@ -236,6 +237,15 @@ $('b-borrar-comp').addEventListener('click', async () => {
   urlsComp.clear();
   pintarComparaciones();
 });
+$('b-registro').addEventListener('click', async () => {
+  const res = await pedir('/imagenes/registro.csv');
+  if (!res.ok) { avisar('No se pudo descargar el registro.'); return; }
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement('a');
+  a.href = url; a.download = 'especuloar_registro_bloqueos.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+});
 $('b-idioma').addEventListener('click', async () => {
   await pedir(`/imagenes/idioma_modelo?ingles=${estado.traducir_al_ingles ? 0 : 1}`, 'POST');
   avisar(estado.traducir_al_ingles ? 'El modelo recibirá cada relato en su idioma.' : 'El modelo recibirá cada relato traducido al inglés.');
@@ -261,6 +271,8 @@ function pintarControles() {
   $('v-detalle').textContent = `${pe.oculta || 0} ocultas, ${(pe.pendiente || 0) + (pe.generando || 0)} en cola, ${pe.fallida || 0} fallidas. `
     + `Hoy: ${estado.imagenes_hoy || 0} de ${estado.tope_diario || 0} imágenes, ${estado.enviadas_a_revision_hoy || 0} enviadas a revisión por su contenido, ${estado.descartadas_proteccion_menores_hoy || 0} eliminadas por protección de menores. `
     + `Filtro del modelo: ${filtro}.`;
+  const rt = estado.registro_por_tipo || {};
+  $('v-registro').textContent = `${rt.filtro_modelo || 0} bloqueos del filtro del modelo, ${rt.proteccion_menores || 0} eliminaciones por protección de menores, ${rt.a_revision || 0} envíos a revisión.`;
   for (const b of document.querySelectorAll('.vistas button')) b.setAttribute('aria-pressed', b.dataset.vista === vista);
 }
 

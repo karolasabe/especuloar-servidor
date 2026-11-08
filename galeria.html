@@ -136,6 +136,7 @@
   #ficha-relato { font-weight: 300; font-size: 13.5px; line-height: 1.7; white-space: pre-wrap; color: #1d1d1d; margin: 0; }
   #ficha-relato.cargando { color: var(--gris-claro); }
   #ficha-relato mark { background: none; color: inherit; text-decoration: underline; text-decoration-thickness: 1.5px; text-underline-offset: 3px; text-decoration-color: var(--c, var(--tinta)); }
+  #ficha-bloqueos { display: none; margin-top: 12px; color: var(--gris); }
   #ficha-traducir { display: none; margin-top: 12px; color: var(--gris); }
   #ficha-traducir:hover { color: var(--tinta); }
   .ficha-nav { display: flex; justify-content: space-between; margin-top: 46px; color: var(--gris); }
@@ -183,6 +184,7 @@
     <div class="ficha-texto">
       <p id="ficha-relato"></p>
       <div id="ficha-cats" class="ficha-cats"></div>
+      <p id="ficha-bloqueos"></p>
       <button id="ficha-traducir" type="button"></button>
     </div>
     <nav class="ficha-nav">
@@ -243,10 +245,12 @@ const COLORES_CLAROS = new Set(['#E8E0D4', '#F5DD2C']);
 
 const IDIOMA = parametros.get('idioma') === 'en' ? 'en' : 'es';
 const T = {
-  es: { imagenes: n => `${n} ${n === 1 ? 'imagen' : 'imágenes'}`, creando: n => `${n} en creación`,
+  es: { bloqueos: n => `(el filtro de contenido del modelo bloqueó ${n === 1 ? 'un intento anterior' : n + ' intentos anteriores'} con este relato; esta imagen salió de otra semilla)`,
+        imagenes: n => `${n} ${n === 1 ? 'imagen' : 'imágenes'}`, creando: n => `${n} en creación`,
         nuevas: n => `(${n} ${n === 1 ? 'nueva' : 'nuevas'})`, vacio: '(las imágenes aparecerán aquí a medida que se generen)',
         cerrar: '(cerrar)', anterior: '(anterior)', siguiente: '(siguiente)', abrir: n => `Abrir imagen ${n}`, imagen: n => `Imagen ${n}`, nueva: 'nueva', cargando: '...' },
-  en: { imagenes: n => `${n} ${n === 1 ? 'image' : 'images'}`, creando: n => `${n} in progress`,
+  en: { bloqueos: n => `(the model's content filter blocked ${n === 1 ? 'an earlier attempt' : n + ' earlier attempts'} with this testimony; this image came from another seed)`,
+        imagenes: n => `${n} ${n === 1 ? 'image' : 'images'}`, creando: n => `${n} in progress`,
         nuevas: n => `(${n} new)`, vacio: '(images will appear here as they are generated)',
         cerrar: '(close)', anterior: '(previous)', siguiente: '(next)', abrir: n => `Open image ${n}`, imagen: n => `Image ${n}`, nueva: 'new', cargando: '...' }
 }[IDIOMA];
@@ -699,6 +703,9 @@ async function abrir(id, desde) {
   fichaRelato.classList.add('cargando');
   botonTraducir.style.display = 'none';
   pintarCategorias(IDIOMA);
+  const bloqueos = document.getElementById('ficha-bloqueos');
+  bloqueos.textContent = img.bloqueos_filtro > 0 ? T.bloqueos(img.bloqueos_filtro) : '';
+  bloqueos.style.display = img.bloqueos_filtro > 0 ? 'block' : 'none';
   if (!ficha.classList.contains('abierta')) {
     ficha.classList.add('abierta');
     document.body.style.overflow = 'hidden';

@@ -132,7 +132,7 @@ _SISTEMA_MENORES = (
     'ginecológicas. Describes su contenido para el panel de moderación de la obra y detectas '
     'material de abuso sexual infantil, que es lo único que se elimina.')
 _PEDIDO_MENORES = (
-    'Revisa la imagen y responde tres preguntas.\n'
+    'Revisa la imagen y responde cuatro preguntas.\n'
     'A) ¿Hay desnudez total o parcial, genitales, pecho, nalgas u otras partes íntimas expuestas '
     'o visibles, una escena de violencia sexual (como una violación o un abuso), un acto sexual o '
     'una pose explícitamente pornográfica? Responde sexual = true o false.\n'
@@ -141,9 +141,11 @@ _PEDIDO_MENORES = (
     'C) Estima qué porcentaje de la superficie de la imagen ocupan letras, palabras o seudoletras, '
     'sumando todas las zonas con escritura (0 si no hay). Cuenta solo la escritura, no los '
     'objetos que la llevan.\n'
+    'D) ¿Aparece en la imagen alguna niña, niño o adolescente, en cualquier situación? Responde '
+    'menores_visibles = true o false.\n'
     'Responde SOLO un JSON {"sexual": true o false, "menor": true o false, "texto_porcentaje": '
-    'un número entre 0 y 100, "motivo": "una frase breve que describa lo que ves, sin detalles '
-    'gráficos"}.')
+    'un número entre 0 y 100, "menores_visibles": true o false, "motivo": "una frase breve que '
+    'describa lo que ves, sin detalles gráficos"}.')
 # Tope diario de llamadas a Replicate: protege el presupuesto si llegan
 # envíos masivos mientras nadie mira.
 IMAGEN_MAX_DIA = int(os.environ.get('IMAGEN_MAX_DIA', '300'))
@@ -1701,6 +1703,20 @@ def init_db():
     c.execute('''ALTER TABLE imagenes ADD COLUMN IF NOT EXISTS rehacer BOOLEAN NOT NULL DEFAULT FALSE''')
     # Por qué una imagen pasó a revisión (contenido sexual adulto, texto simulado).
     c.execute('''ALTER TABLE imagenes ADD COLUMN IF NOT EXISTS nota TEXT''')
+    # Intentos que el filtro del modelo bloqueó antes de la imagen actual.
+    c.execute('''ALTER TABLE imagenes ADD COLUMN IF NOT EXISTS bloqueos_filtro INTEGER NOT NULL DEFAULT 0''')
+    # Registro para el estudio: bloqueos del filtro del modelo, eliminaciones
+    # por protección de menores e imágenes enviadas a revisión. No guarda imágenes.
+    c.execute('''CREATE TABLE IF NOT EXISTS registro_bloqueos (
+        id SERIAL PRIMARY KEY,
+        respuesta_id INTEGER,
+        origen TEXT,
+        tipo TEXT,
+        idioma TEXT,
+        semilla BIGINT,
+        prompt TEXT,
+        motivo TEXT,
+        cuando TEXT)''')
     # Prueba de idioma: el mismo relato en su idioma y traducido al inglés,
     # con la misma semilla. No se publica; solo se ve en el panel.
     c.execute('''CREATE TABLE IF NOT EXISTS comparaciones (
@@ -2449,11 +2465,26 @@ def estado_filtro_modelo():
     return 'desactivado' if 'disable_safety_checker' in campos else 'activo'
 
 
+def _registrar_evento(respuesta_id, origen, tipo, idioma, semilla, prompt, motivo):
+    try:
+        conn = get_conn()
+        conn.cursor().execute('''INSERT INTO registro_bloqueos
+            (respuesta_id, origen, tipo, idioma, semilla, prompt, motivo, cuando)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)''',
+            (respuesta_id, origen, tipo, idioma, semilla, prompt, (motivo or '')[:500],
+             _ahora().isoformat()))
+        conn.commit()
+        conn.close()
+    except Exception as e:  # el registro nunca detiene la generación
+        log.warning('registro_bloqueos: %s', type(e).__name__)
+
+
 def revisar_imagen(datos, mime):
     """Una sola consulta por imagen. Devuelve (eliminar, notas): eliminar es
     verdadero solo si hay contenido sexual con una persona que aparenta ser
     menor de edad; notas lista lo que manda la imagen a revisión (contenido
-    sexual de personas adultas, texto simulado sobre el tope). Ante una
+    sexual de personas adultas, texto simulado sobre el tope, presencia de
+    niñas o niños). Ante una
     respuesta ilegible la imagen no se guarda."""
     contenido = [
         {'type': 'image', 'source': {'type': 'base64', 'media_type': mime,
@@ -2475,6 +2506,10 @@ def revisar_imagen(datos, mime):
         notas.append('desnudez o contenido sexual')
     if porcentaje > IMAGEN_TEXTO_MAX_PORCENTAJE:
         notas.append(f'texto simulado en {round(porcentaje)}% de la imagen')
+    if not menor and bool(datos_r.get('menores_visibles')):
+        # Escenas con niñas o niños sin contenido sexual: se conservan y las
+        # revisa la persona a cargo del panel antes de publicarlas.
+        notas.append('aparecen niñas, niños o adolescentes')
     return menor, notas
 
 
@@ -2716,6 +2751,8 @@ def _actualizar_imagen(imagen_id, **campos):
 def procesar_imagen(trabajo):
     imagen_id, respuesta_id, conceptos_json, prompt, intentos = trabajo[:5]
     rehaciendo = len(trabajo) > 5 and trabajo[5]
+    semilla = None
+    idioma_usado = 'original'
     try:
         conn = get_conn()
         c = conn.cursor()
@@ -2732,6 +2769,7 @@ def procesar_imagen(trabajo):
             texto = fila[0] or ''
             if _traducir_para_modelo():
                 texto = traduccion_al_ingles(respuesta_id, texto)
+                idioma_usado = 'en'
             prompt = ' '.join(texto.split())[:IMAGEN_RELATO_MAX_CARACTERES]
             if not prompt:
                 raise ErrorImagen('relato vacío')
@@ -2750,10 +2788,14 @@ def procesar_imagen(trabajo):
         eliminar, notas = revisar_imagen(resultado['datos'], resultado['mime'])
         if eliminar:
             _sumar_consumo('menores_descartadas')
+            _registrar_evento(respuesta_id, 'galeria', 'proteccion_menores', idioma_usado, semilla,
+                              prompt, revisar_imagen.ultimo_motivo)
             raise ErrorImagen('protección de menores: imagen eliminada sin guardar ('
                               + revisar_imagen.ultimo_motivo + '); se intenta con otra semilla')
         if notas:
             _sumar_consumo('enviadas_a_revision')
+            _registrar_evento(respuesta_id, 'galeria', 'a_revision', idioma_usado, semilla, prompt,
+                              '; '.join(notas) + ' | ' + revisar_imagen.ultimo_motivo)
         conn = get_conn()
         previa = _moderacion_previa(conn.cursor())
         conn.close()
@@ -2785,6 +2827,16 @@ def procesar_imagen(trabajo):
         return 'bloqueo'
     except ErrorImagen as e:
         log.warning('imagenes: relato %s, intento %s: %s', respuesta_id, intentos, e)
+        if 'nsfw' in str(e).lower():
+            # El filtro del modelo bloqueó este intento: se cuenta, se registra
+            # y se prueba con otra semilla.
+            conn = get_conn()
+            conn.cursor().execute('UPDATE imagenes SET bloqueos_filtro = bloqueos_filtro + 1 WHERE id = %s',
+                                  (imagen_id,))
+            conn.commit()
+            conn.close()
+            _registrar_evento(respuesta_id, 'galeria', 'filtro_modelo', idioma_usado, semilla, prompt,
+                              'el filtro de contenido del modelo bloqueó la imagen')
         if rehaciendo:
             # La imagen anterior sigue a la vista; se reintenta más tarde o se deja.
             otra_vez = intentos < IMAGEN_MAX_INTENTOS
@@ -3041,7 +3093,7 @@ def listar_imagenes():
     c = conn.cursor()
     c.execute('''SELECT i.id, i.respuesta_id, i.generada, r.timestamp, r.categorias_activadas,
         CASE WHEN %s THEN r.relato ELSE NULL END,
-        CASE WHEN %s THEN f.datos ELSE NULL END
+        CASE WHEN %s THEN f.datos ELSE NULL END, i.bloqueos_filtro
         FROM imagenes i JOIN respuestas r ON r.id = i.respuesta_id
         LEFT JOIN frases f ON f.respuesta_id = i.respuesta_id AND f.estado = 'lista'
         WHERE i.estado = 'lista' ORDER BY i.respuesta_id''', (con_palabras, con_palabras))
@@ -3050,7 +3102,7 @@ def listar_imagenes():
     conteo = dict(c.fetchall())
     conn.close()
     imagenes = []
-    for imagen_id, rid, generada, ts_relato, cats, relato, frases_json in filas:
+    for imagen_id, rid, generada, ts_relato, cats, relato, frases_json, bloqueos in filas:
         try:
             categorias = json.loads(cats or '[]')
         except ValueError:
@@ -3066,6 +3118,7 @@ def listar_imagenes():
             'reciente': edad is not None and edad < IMAGEN_RECIENTE_SEGUNDOS,
             'colores': [CATEGORIAS.get(k, {}).get('color', '#888') for k in categorias],
             'categorias': categorias,
+            'bloqueos_filtro': bloqueos or 0,
         }
         if con_palabras:
             item['palabras'] = palabras_del_relato(rid, relato)
@@ -3156,6 +3209,8 @@ def estado_imagenes():
     replicate_hoy = _consumo_hoy(c, SERVICIO_REPLICATE)
     menores_hoy = _consumo_hoy(c, 'menores_descartadas')
     revision_hoy = _consumo_hoy(c, 'enviadas_a_revision')
+    c.execute('SELECT tipo, COUNT(*) FROM registro_bloqueos GROUP BY tipo')
+    registro_por_tipo = dict(c.fetchall())
     previa = _moderacion_previa(c)
     al_ingles = _leer_config(c, 'traducir_al_ingles') == '1'
     anthropic_hoy = _consumo_hoy(c, 'anthropic')
@@ -3182,6 +3237,7 @@ def estado_imagenes():
         'traducir_al_ingles': al_ingles,
         'descartadas_proteccion_menores_hoy': menores_hoy,
         'enviadas_a_revision_hoy': revision_hoy,
+        'registro_por_tipo': registro_por_tipo,
         'texto_max_porcentaje': IMAGEN_TEXTO_MAX_PORCENTAJE,
         'detenido_por': bloqueo,
         'token_replicate': formato_token_replicate(),
@@ -3208,7 +3264,7 @@ def detalle_imagenes():
     c = conn.cursor()
     c.execute('''SELECT i.id, i.respuesta_id, i.estado, i.intentos, i.conceptos, i.prompt,
         i.negative_prompt, i.modelo_texto, i.modelo_imagen, i.parametros, i.semilla,
-        i.prediccion_id, i.error, i.creada, i.generada, r.relato, i.nota
+        i.prediccion_id, i.error, i.creada, i.generada, r.relato, i.nota, i.bloqueos_filtro
         FROM imagenes i LEFT JOIN respuestas r ON r.id = i.respuesta_id ORDER BY i.respuesta_id''')
     columnas = [d[0] for d in c.description]
     filas = [dict(zip(columnas, f)) for f in c.fetchall()]
@@ -3281,7 +3337,7 @@ def regenerar_imagen(respuesta_id):
         extra = ''
     return _accion_relato(respuesta_id,
         f'''UPDATE imagenes SET estado = 'pendiente', intentos = 0, error = NULL,
-            proximo_intento = NULL{extra}
+            proximo_intento = NULL, bloqueos_filtro = 0{extra}
             WHERE estado <> 'generando' AND respuesta_id = %s''')
 
 
@@ -3294,7 +3350,8 @@ def rehacer_todas():
     conn = get_conn()
     c = conn.cursor()
     c.execute('''UPDATE imagenes SET rehacer = TRUE, conceptos = NULL, prompt = NULL,
-        intentos = 0, proximo_intento = NULL, error = NULL WHERE estado = 'lista' ''')
+        intentos = 0, proximo_intento = NULL, error = NULL, bloqueos_filtro = 0
+        WHERE estado = 'lista' ''')
     n = c.rowcount
     conn.commit()
     conn.close()
@@ -3365,6 +3422,8 @@ def _procesar_comparaciones():
                 eliminar, notas = revisar_imagen(resultado['datos'], resultado['mime'])
                 if eliminar:
                     _sumar_consumo('menores_descartadas')
+                    _registrar_evento(rid, 'comparacion', 'proteccion_menores', variante, semilla,
+                                      prompt, revisar_imagen.ultimo_motivo)
                     campos.update(estado='descartada', error='protección de menores: '
                                   + revisar_imagen.ultimo_motivo)
                 else:
@@ -3378,6 +3437,8 @@ def _procesar_comparaciones():
                 campos.update(estado='pendiente', error=str(e)[:500])
             except ErrorImagen as e:
                 if 'nsfw' in str(e).lower():
+                    _registrar_evento(rid, 'comparacion', 'filtro_modelo', variante, semilla,
+                                      campos.get('prompt'), 'el filtro de contenido del modelo bloqueó la imagen')
                     # En la comparación no se cambia la semilla: el bloqueo es el resultado.
                     campos.update(estado='bloqueada',
                                   error='bloqueada por el filtro de contenido del modelo (misma semilla)')
@@ -3426,6 +3487,31 @@ def comparar_idiomas():
     conn.close()
     threading.Thread(target=_procesar_comparaciones, daemon=True).start()
     return jsonify({'status': 'ok', 'relatos': rids, 'imagenes': 2 * len(rids)})
+
+
+@app.route('/imagenes/registro.csv', methods=['GET'])
+@requiere_admin
+def descargar_registro():
+    """Planilla con bloqueos del filtro del modelo, eliminaciones por
+    protección de menores e imágenes enviadas a revisión."""
+    import csv
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('''SELECT b.cuando, b.origen, b.tipo, b.respuesta_id, b.idioma, b.semilla,
+            b.motivo, b.prompt, r.relato
+        FROM registro_bloqueos b LEFT JOIN respuestas r ON r.id = b.respuesta_id
+        ORDER BY b.id''')
+    filas = c.fetchall()
+    conn.close()
+    salida = io.StringIO()
+    escritor = csv.writer(salida)
+    escritor.writerow(['cuando', 'origen', 'tipo', 'relato_id', 'idioma_del_prompt', 'semilla',
+                       'motivo_o_nota', 'texto_que_recibio_el_modelo', 'relato'])
+    escritor.writerows(filas)
+    respuesta = app.response_class('\ufeff' + salida.getvalue(), mimetype='text/csv; charset=utf-8')
+    respuesta.headers['Content-Disposition'] = 'attachment; filename="especuloar_registro_bloqueos.csv"'
+    respuesta.headers['Cache-Control'] = 'private, no-store'
+    return respuesta
 
 
 @app.route('/imagenes/comparaciones', methods=['GET'])
