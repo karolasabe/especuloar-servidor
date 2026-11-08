@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Espéculo(ar) - moderación</title>
+<style>
+  @font-face { font-family: 'Roboto'; src: url('Roboto-Light.woff2') format('woff2'); font-weight: 300; font-display: swap; }
+  @font-face { font-family: 'Roboto'; src: url('Roboto-Regular.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+  :root { --papel: #faf9f6; --tinta: #151515; --gris: #8b8880; --linea: #dedad2; --alerta: #a3242b; --margen: 40px; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--papel); color: var(--tinta); font: 400 12px/1.5 'Roboto', system-ui, sans-serif; }
+  button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+  button:hover { text-decoration: underline; text-underline-offset: 3px; }
+  button:focus-visible, input:focus-visible { outline: 1px dotted var(--tinta); outline-offset: 3px; }
+  button:disabled { color: var(--gris); cursor: default; text-decoration: none; }
+  header { display: flex; justify-content: space-between; align-items: baseline; padding: 30px var(--margen) 20px; }
+  .gris { color: var(--gris); }
+  #entrada { padding: 0 var(--margen); }
+  #entrada input { font: inherit; border: 0; border-bottom: 1px solid var(--tinta); background: none; width: 260px; padding: 4px 0; margin-right: 14px; }
+  #panel { display: none; padding: 0 var(--margen) 80px; }
+  .controles { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px 40px; padding: 18px 0 26px; border-top: 1px solid var(--linea); border-bottom: 1px solid var(--linea); }
+  .control .titulo { color: var(--gris); margin-bottom: 4px; }
+  .control .valor { font-size: 15px; font-weight: 300; margin-bottom: 6px; }
+  .control .valor.alerta { color: var(--alerta); }
+  .control p { margin: 6px 0 0; color: var(--gris); max-width: 340px; }
+  .vistas { display: flex; gap: 22px; flex-wrap: wrap; padding: 22px 0; }
+  .vistas button[aria-pressed="true"] { text-decoration: underline; text-underline-offset: 3px; }
+  #grilla { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 34px 26px; }
+  .tarjeta .foto { width: 100%; aspect-ratio: 1 / 1; background: #ebe8e1; display: block; object-fit: cover; cursor: zoom-in; }
+  .tarjeta .foto.sin { display: flex; align-items: center; justify-content: center; color: var(--gris); cursor: default; padding: 14px; text-align: center; }
+  .tarjeta .linea { display: flex; justify-content: space-between; gap: 10px; margin-top: 8px; }
+  .tarjeta .estado.por_revisar { color: var(--alerta); }
+  .tarjeta .acciones { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 6px; }
+  .tarjeta .texto { display: none; margin-top: 10px; color: #1d1d1d; font-weight: 300; font-size: 12.5px; line-height: 1.6; white-space: pre-wrap; }
+  .tarjeta.abierta .texto { display: block; }
+  .tarjeta .texto .rotulo { color: var(--gris); font-weight: 400; display: block; margin-top: 8px; }
+  #mensaje { position: fixed; bottom: 18px; left: var(--margen); color: var(--gris); }
+  @media (max-width: 700px) { :root { --margen: 16px; } }
+</style>
+</head>
+<body>
+<header>
+  <div>ESPÉCULO(AR) <span class="gris">moderación</span></div>
+  <button id="salir" type="button" hidden>(salir)</button>
+</header>
+
+<form id="entrada">
+  <label class="gris" for="token">ADMIN_TOKEN</label><br>
+  <input id="token" type="password" autocomplete="current-password" required>
+  <button type="submit">(entrar)</button>
+  <p class="gris" id="error-entrada"></p>
+</form>
+
+<main id="panel">
+  <section class="controles">
+    <div class="control">
+      <div class="titulo">Generación de imágenes</div>
+      <div class="valor" id="v-generacion">&nbsp;</div>
+      <button id="b-generacion" type="button"></button>
+      <p>En pausa, los relatos nuevos siguen llegando a la galaxia y quedan en cola, sin imagen, hasta reanudar.</p>
+    </div>
+    <div class="control">
+      <div class="titulo">Moderación previa</div>
+      <div class="valor" id="v-previa">&nbsp;</div>
+      <button id="b-previa" type="button"></button>
+      <p>Activada, cada imagen nueva espera aprobación aquí antes de aparecer en la galería, el monitor y la proyección.</p>
+    </div>
+    <div class="control">
+      <div class="titulo">Estado</div>
+      <div class="valor" id="v-cuentas">&nbsp;</div>
+      <p id="v-detalle"></p>
+    </div>
+  </section>
+
+  <nav class="vistas" aria-label="Filtrar imágenes">
+    <button type="button" data-vista="por_revisar">(por revisar)</button>
+    <button type="button" data-vista="lista">(publicadas)</button>
+    <button type="button" data-vista="oculta">(ocultas)</button>
+    <button type="button" data-vista="cola">(en cola o fallidas)</button>
+    <button type="button" data-vista="todas">(todas)</button>
+  </nav>
+  <div id="grilla"></div>
+</main>
+<div id="mensaje" role="status"></div>
+
+<script>
+// Panel de moderación. El token se guarda solo en esta pestaña
+// (sessionStorage) y se borra al cerrarla o con (salir).
+const API_BASE = new URLSearchParams(location.search).get('api') || 'https://especuloar-servidor.onrender.com';
+let token = '';
+try { token = sessionStorage.getItem('especuloar_admin') || ''; } catch (e) {}
+let vista = 'por_revisar';
+let filas = [];
+let estado = {};
+const abiertas = new Set();
+const urlsFotos = new Map();   // id de imagen + generada -> object URL
+
+const $ = id => document.getElementById(id);
+function avisar(texto) { $('mensaje').textContent = texto; clearTimeout(avisar.t); avisar.t = setTimeout(() => { $('mensaje').textContent = ''; }, 4000); }
+
+async function pedir(ruta, metodo) {
+  const res = await fetch(API_BASE + ruta, { method: metodo || 'GET', headers: { Authorization: 'Bearer ' + token }, cache: 'no-store' });
+  if (res.status === 401) { salir('El token no coincide con el ADMIN_TOKEN de Render.'); throw new Error('401'); }
+  return res;
+}
+
+function salir(motivo) {
+  token = '';
+  try { sessionStorage.removeItem('especuloar_admin'); } catch (e) {}
+  $('panel').style.display = 'none'; $('salir').hidden = true; $('entrada').style.display = 'block';
+  $('error-entrada').textContent = motivo || '';
+}
+
+$('entrada').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  token = $('token').value.trim();
+  $('token').value = '';
+  try {
+    const res = await pedir('/imagenes/detalle');
+    if (!res.ok) throw new Error(res.status);
+  } catch (err) { if (token) $('error-entrada').textContent = 'No se pudo conectar con el servidor.'; return; }
+  try { sessionStorage.setItem('especuloar_admin', token); } catch (e) {}
+  $('entrada').style.display = 'none'; $('panel').style.display = 'block'; $('salir').hidden = false;
+  $('error-entrada').textContent = '';
+  actualizar();
+});
+$('salir').addEventListener('click', () => salir());
+
+const NOMBRES = { lista: 'publicada', por_revisar: 'por revisar', oculta: 'oculta', pendiente: 'en cola', generando: 'generando', fallida: 'fallida' };
+
+async function actualizar() {
+  if (!token) return;
+  try {
+    const [rd, re] = await Promise.all([pedir('/imagenes/detalle'), fetch(API_BASE + '/imagenes/estado', { cache: 'no-store' })]);
+    filas = (await rd.json()).sort((a, b) => b.respuesta_id - a.respuesta_id);
+    estado = await re.json();
+  } catch (e) { return; }
+  pintarControles();
+  pintarGrilla();
+}
+
+function pintarControles() {
+  const pausa = estado.en_pausa;
+  $('v-generacion').textContent = pausa ? 'en pausa' : 'activa';
+  $('v-generacion').classList.toggle('alerta', !!pausa);
+  $('b-generacion').textContent = pausa ? '(reanudar)' : '(pausar)';
+  const previa = estado.moderacion_previa;
+  $('v-previa').textContent = previa ? 'activada' : 'desactivada';
+  $('b-previa').textContent = previa ? '(desactivar)' : '(activar)';
+  const pe = estado.por_estado || {};
+  const porRevisar = pe.por_revisar || 0;
+  $('v-cuentas').textContent = `${pe.lista || 0} publicadas, ${porRevisar} por revisar`;
+  $('v-cuentas').classList.toggle('alerta', porRevisar > 0);
+  const filtro = { desactivado: 'desactivado', activo: 'activo (el modelo no permite apagarlo)', desconocido: 'sin confirmar' }[estado.filtro_modelo] || '...';
+  $('v-detalle').textContent = `${pe.oculta || 0} ocultas, ${(pe.pendiente || 0) + (pe.generando || 0)} en cola, ${pe.fallida || 0} fallidas. `
+    + `Hoy: ${estado.imagenes_hoy || 0} de ${estado.tope_diario || 0} imágenes, ${estado.descartadas_proteccion_menores_hoy || 0} descartadas por protección de menores. `
+    + `Filtro del modelo: ${filtro}.`;
+  for (const b of document.querySelectorAll('.vistas button')) b.setAttribute('aria-pressed', b.dataset.vista === vista);
+}
+
+function filtrar() {
+  if (vista === 'todas') return filas;
+  if (vista === 'cola') return filas.filter(f => ['pendiente', 'generando', 'fallida'].includes(f.estado));
+  return filas.filter(f => f.estado === vista);
+}
+
+async function cargarFoto(img, f) {
+  const clave = f.id + ':' + (f.generada || '');
+  if (urlsFotos.has(clave)) { img.src = urlsFotos.get(clave); return; }
+  try {
+    const res = await pedir(`/imagen/${f.id}?ancho=360`);
+    if (!res.ok) return;
+    const url = URL.createObjectURL(await res.blob());
+    urlsFotos.set(clave, url);
+    img.src = url;
+  } catch (e) {}
+}
+
+function boton(texto, accion) {
+  const b = document.createElement('button');
+  b.type = 'button'; b.textContent = texto;
+  b.addEventListener('click', async () => {
+    b.disabled = true;
+    try { await accion(); } finally { b.disabled = false; }
+  });
+  return b;
+}
+
+async function accionRelato(rid, que, extra) {
+  const res = await pedir(`/imagenes/relato/${rid}/${que}${extra || ''}`, 'POST');
+  const datos = await res.json().catch(() => ({}));
+  avisar(res.ok ? `Relato ${rid}: ${{ aprobar: 'aprobado', ocultar: 'oculto', mostrar: 'publicado', regenerar: 'en cola para una imagen nueva' }[que]}.`
+                : `Relato ${rid}: ${datos.mensaje || 'no se pudo'}.`);
+  actualizar();
+}
+
+function pintarGrilla() {
+  const grilla = $('grilla');
+  grilla.innerHTML = '';
+  const lista = filtrar();
+  if (!lista.length) { grilla.innerHTML = '<p class="gris">(nada en esta vista)</p>'; return; }
+  for (const f of lista) {
+    const t = document.createElement('article');
+    t.className = 'tarjeta' + (abiertas.has(f.id) ? ' abierta' : '');
+    let foto;
+    if (['lista', 'por_revisar', 'oculta'].includes(f.estado)) {
+      foto = document.createElement('img');
+      foto.className = 'foto'; foto.alt = `Imagen del relato ${f.respuesta_id}`;
+      cargarFoto(foto, f);
+      foto.addEventListener('click', () => { abiertas.has(f.id) ? abiertas.delete(f.id) : abiertas.add(f.id); t.classList.toggle('abierta'); });
+    } else {
+      foto = document.createElement('div');
+      foto.className = 'foto sin';
+      foto.textContent = f.estado === 'fallida' ? (f.error || 'fallida') : 'sin imagen todavía';
+    }
+    const linea = document.createElement('div');
+    linea.className = 'linea';
+    linea.innerHTML = `<span>relato ${f.respuesta_id}</span><span class="estado ${f.estado}">${NOMBRES[f.estado] || f.estado}</span>`;
+    const acciones = document.createElement('div');
+    acciones.className = 'acciones';
+    if (f.estado === 'por_revisar') acciones.append(boton('(aprobar)', () => accionRelato(f.respuesta_id, 'aprobar')));
+    if (f.estado === 'lista' || f.estado === 'por_revisar') acciones.append(boton('(ocultar)', () => accionRelato(f.respuesta_id, 'ocultar')));
+    if (f.estado === 'oculta') acciones.append(boton('(publicar)', () => accionRelato(f.respuesta_id, 'mostrar')));
+    if (f.estado !== 'generando') acciones.append(boton('(nueva imagen)', () => accionRelato(f.respuesta_id, 'regenerar', '?todo=1')));
+    acciones.append(boton('(ver texto)', async () => { abiertas.has(f.id) ? abiertas.delete(f.id) : abiertas.add(f.id); t.classList.toggle('abierta'); }));
+    const texto = document.createElement('div');
+    texto.className = 'texto';
+    const r = document.createElement('span'); r.className = 'rotulo'; r.textContent = 'relato';
+    const tr = document.createTextNode(f.relato || '');
+    const p = document.createElement('span'); p.className = 'rotulo'; p.textContent = 'lo que recibió el modelo';
+    const tp = document.createTextNode(f.prompt || '');
+    texto.append(r, tr, p, tp);
+    t.append(foto, linea, acciones, texto);
+    grilla.appendChild(t);
+  }
+}
+
+$('b-generacion').addEventListener('click', async () => {
+  await pedir(estado.en_pausa ? '/imagenes/reanudar' : '/imagenes/pausar', 'POST');
+  avisar(estado.en_pausa ? 'Generación reanudada.' : 'Generación en pausa.');
+  actualizar();
+});
+$('b-previa').addEventListener('click', async () => {
+  await pedir(`/imagenes/moderacion_previa?activa=${estado.moderacion_previa ? 0 : 1}`, 'POST');
+  avisar(estado.moderacion_previa ? 'Moderación previa desactivada: las imágenes nuevas se publican solas.' : 'Moderación previa activada: las imágenes nuevas esperan aprobación.');
+  actualizar();
+});
+for (const b of document.querySelectorAll('.vistas button')) {
+  b.addEventListener('click', () => { vista = b.dataset.vista; pintarControles(); pintarGrilla(); });
+}
+
+if (token) {
+  $('entrada').style.display = 'none'; $('panel').style.display = 'block'; $('salir').hidden = false;
+  actualizar();
+}
+setInterval(actualizar, 30000);
+</script>
+</body>
+</html>

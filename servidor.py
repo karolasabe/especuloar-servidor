@@ -100,15 +100,40 @@ IMAGEN_PARAMETROS = {
 # los relatos.
 IMAGEN_NEGATIVE_PROMPT = os.environ.get('IMAGEN_NEGATIVE_PROMPT', 'text, watermark, signature')
 # Cómo se arma el prompt:
+#   'relato' (por omisión): el modelo recibe el relato tal como llegó, sin
+#     extracción, sin plantilla, sin línea de estilo y sin negative prompt.
+#     El codificador de texto de SD 1.5 lee los primeros 77 tokens (unas 40 a
+#     50 palabras en español); el resto no llega al modelo.
 #   'plantilla' (la de la tesis, especuloar_prompts.xlsx): los conceptos entran
 #     con las palabras de quien escribe, en español, ordenados por eje, más una
 #     línea de estilo. Ninguna capa intermedia los reescribe.
 #   'redactado': Claude redacta un prompt en inglés a partir de los conceptos.
-IMAGEN_MODO_PROMPT = os.environ.get('IMAGEN_MODO_PROMPT', 'plantilla')
+IMAGEN_MODO_PROMPT = os.environ.get('IMAGEN_MODO_PROMPT', 'relato')
+IMAGEN_RELATO_MAX_CARACTERES = 2000
 IMAGEN_ESTILO = os.environ.get(
     'IMAGEN_ESTILO',
     'Hyperrealistic sculpture, studio photography, neutral background, cinematic light, 8k')
 IMAGEN_CONCEPTOS_POR_EJE = int(os.environ.get('IMAGEN_CONCEPTOS_POR_EJE', '4'))
+# Filtro de contenido del modelo (el de Stable Diffusion: tapa desnudos y
+# contenido sexual). Se pide desactivarlo; si el modelo no acepta la opción,
+# /imagenes/estado lo informa.
+IMAGEN_SIN_FILTRO_MODELO = os.environ.get('IMAGEN_SIN_FILTRO_MODELO', '1') == '1'
+# Único filtro de la obra: cada imagen se revisa antes de guardarla y se
+# descarta, sin guardarse, si muestra a una persona que aparenta ser menor de
+# edad desnuda o en un contexto sexual. No tiene interruptor.
+_SISTEMA_MENORES = (
+    'Revisas imágenes generadas automáticamente para una obra de arte sobre experiencias '
+    'ginecológicas. Tu única tarea es detectar material de abuso sexual infantil.')
+_PEDIDO_MENORES = (
+    'Revisa la imagen con el criterio más restrictivo. Responde descartar = true si aparece '
+    'alguna persona que aparente ser menor de 18 años y se cumple cualquiera de estas '
+    'condiciones: tiene los genitales, el pecho, las nalgas u otras partes íntimas expuestas '
+    'o visibles, aunque sea parcialmente; está desnuda o semidesnuda; hay una escena de '
+    'violencia sexual, como una violación o un abuso; hay un acto sexual; o aparece en una '
+    'pose explícitamente pornográfica. Si no puedes determinar si la persona es menor de edad, '
+    'considérala menor. Violencia sin contenido sexual, sangre, carne, anatomía, desnudez de '
+    'personas claramente adultas o imágenes perturbadoras no son motivo para descartar. '
+    'Responde SOLO un JSON {"descartar": true} o {"descartar": false}.')
 # Tope diario de llamadas a Replicate: protege el presupuesto si llegan
 # envíos masivos mientras nadie mira.
 IMAGEN_MAX_DIA = int(os.environ.get('IMAGEN_MAX_DIA', '300'))
@@ -2331,13 +2356,46 @@ def _campos_entrada():
     return campos
 
 
+def estado_filtro_modelo():
+    """'desactivado', 'activo' (el modelo no permite desactivarlo o no se pidió)
+    o 'desconocido' (aún no se leyó el esquema del modelo)."""
+    if not IMAGEN_SIN_FILTRO_MODELO:
+        return 'activo'
+    if not _esquema_replicate['cargado'] and time.time() - _esquema_replicate.get('intento', 0) > 300:
+        # Se lee en segundo plano para no demorar /imagenes ni /imagenes/estado.
+        _esquema_replicate['intento'] = time.time()
+        threading.Thread(target=_campos_entrada, daemon=True).start()
+    if not _esquema_replicate['cargado']:
+        return 'desconocido'
+    campos = _esquema_replicate['campos'] or {}
+    return 'desactivado' if 'disable_safety_checker' in campos else 'activo'
+
+
+def revisar_menores(datos, mime):
+    """Devuelve True si la imagen debe descartarse. Ante cualquier duda
+    (respuesta ilegible, error), la imagen no se guarda."""
+    contenido = [
+        {'type': 'image', 'source': {'type': 'base64', 'media_type': mime,
+                                     'data': base64.b64encode(datos).decode('ascii')}},
+        {'type': 'text', 'text': _PEDIDO_MENORES},
+    ]
+    texto = _claude(_SISTEMA_MENORES, contenido, max_tokens=200)
+    try:
+        return bool(_json_de_respuesta(texto)['descartar'])
+    except Exception:
+        raise ErrorImagen('protección de menores: respuesta ilegible; la imagen no se guarda')
+
+
 def _entrada_para_modelo(prompt, semilla):
     """Arma la entrada y descarta lo que el modelo no acepta, dejando
     registro de lo omitido para la trazabilidad."""
     entrada = dict(IMAGEN_PARAMETROS)
     entrada['prompt'] = prompt
-    entrada['negative_prompt'] = IMAGEN_NEGATIVE_PROMPT
+    if IMAGEN_MODO_PROMPT != 'relato' and IMAGEN_NEGATIVE_PROMPT.strip():
+        entrada['negative_prompt'] = IMAGEN_NEGATIVE_PROMPT
     entrada['seed'] = semilla
+    if IMAGEN_SIN_FILTRO_MODELO:
+        entrada['disable_safety_checker'] = True
     omitidos = []
     campos = _campos_entrada()
     if campos:
@@ -2490,6 +2548,12 @@ def _imagenes_en_pausa(c):
     return _leer_config(c, 'imagenes_pausa') == '1'
 
 
+def _moderacion_previa(c):
+    """Con moderación previa, cada imagen nueva espera aprobación en el panel
+    antes de aparecer en la galería, el monitor y la proyección."""
+    return _leer_config(c, 'moderacion_previa') == '1'
+
+
 def reclamar_imagen():
     """Toma el siguiente relato pendiente. Los más nuevos van primero, así
     un envío que llega durante el relleno inicial no espera la cola."""
@@ -2568,19 +2632,32 @@ def procesar_imagen(trabajo):
             conn.commit()
             conn.close()
             return 'sin_relato'
-        if conceptos_json:
+        if IMAGEN_MODO_PROMPT == 'relato':
+            prompt = ' '.join((fila[0] or '').split())[:IMAGEN_RELATO_MAX_CARACTERES]
+            if not prompt:
+                raise ErrorImagen('relato vacío')
+            _actualizar_imagen(imagen_id, prompt=prompt, conceptos=None, modelo_texto=None)
+        elif conceptos_json:
             conceptos = json.loads(conceptos_json)
         else:
             conceptos = extraer_conceptos(fila[0] or '')
             _actualizar_imagen(imagen_id, conceptos=json.dumps(conceptos, ensure_ascii=False),
                                modelo_texto=IMAGEN_MODELO_TEXTO)
         if not prompt:
-            prompt = generar_prompt(conceptos)
+            prompt = generar_prompt(conceptos)  # noqa: F821 (solo en los modos con conceptos)
             _actualizar_imagen(imagen_id, prompt=prompt, modelo_texto=IMAGEN_MODELO_TEXTO)
         semilla = secrets.randbelow(2 ** 31)
         resultado = generar_en_replicate(prompt, semilla)
+        if revisar_menores(resultado['datos'], resultado['mime']):
+            _sumar_consumo('menores_descartadas')
+            raise ErrorImagen('protección de menores: imagen descartada sin guardar; '
+                              'se intenta con otra semilla')
+        conn = get_conn()
+        previa = _moderacion_previa(conn.cursor())
+        conn.close()
         _actualizar_imagen(
-            imagen_id, estado='lista', datos=psycopg2.Binary(resultado['datos']),
+            imagen_id, estado='por_revisar' if previa else 'lista',
+            datos=psycopg2.Binary(resultado['datos']),
             mime=resultado['mime'], semilla=semilla, prediccion_id=resultado['prediccion_id'],
             modelo_imagen=resultado['modelo'], negative_prompt=resultado['negative_prompt'],
             parametros=json.dumps(resultado['parametros'], ensure_ascii=False),
@@ -2893,6 +2970,7 @@ def listar_imagenes():
         'imagenes': imagenes,
         'pendientes': conteo.get('pendiente', 0),
         'generando': conteo.get('generando', 0),
+        'filtro_modelo': estado_filtro_modelo(),
     })
 
 
@@ -2930,8 +3008,12 @@ def obtener_imagen(imagen_id):
     la grilla de la galería."""
     conn = get_conn()
     c = conn.cursor()
-    c.execute("SELECT datos, mime, generada FROM imagenes WHERE id = %s AND estado = 'lista'",
-              (imagen_id,))
+    admin = bool(ADMIN_TOKEN) and _token_admin_valido()
+    if admin:
+        c.execute("SELECT datos, mime, generada FROM imagenes WHERE id = %s", (imagen_id,))
+    else:
+        c.execute("SELECT datos, mime, generada FROM imagenes WHERE id = %s AND estado = 'lista'",
+                  (imagen_id,))
     fila = c.fetchone()
     conn.close()
     if not fila or fila[0] is None:
@@ -2945,7 +3027,9 @@ def obtener_imagen(imagen_id):
         ancho = max(96, min(ancho, 768))
         datos, mime = _miniatura(imagen_id, fila[2] or '', datos, mime, ancho)
     respuesta = app.response_class(datos, mimetype=mime)
-    if request.args.get('v'):
+    if admin:
+        respuesta.headers['Cache-Control'] = 'private, no-store'
+    elif request.args.get('v'):
         respuesta.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
     else:
         respuesta.headers['Cache-Control'] = 'public, max-age=300'
@@ -2961,6 +3045,8 @@ def estado_imagenes():
     pausa = _imagenes_en_pausa(c)
     bloqueo = _bloqueo_vigente(c)
     replicate_hoy = _consumo_hoy(c, SERVICIO_REPLICATE)
+    menores_hoy = _consumo_hoy(c, 'menores_descartadas')
+    previa = _moderacion_previa(c)
     anthropic_hoy = _consumo_hoy(c, 'anthropic')
     latido = _leer_config(c, 'imagenes_latido')
     c.execute("SELECT estado, COUNT(*) FROM frases GROUP BY estado")
@@ -2981,6 +3067,8 @@ def estado_imagenes():
         'generador_vivo': latido_hace is not None and latido_hace < 180,
         'latido_hace_s': latido_hace,
         'en_pausa': pausa,
+        'moderacion_previa': previa,
+        'descartadas_proteccion_menores_hoy': menores_hoy,
         'detenido_por': bloqueo,
         'token_replicate': formato_token_replicate(),
         'por_estado': conteo,
@@ -2989,6 +3077,7 @@ def estado_imagenes():
         'llamadas_claude_hoy': anthropic_hoy,
         'frases_por_estado': frases_conteo,
         'por_rehacer': por_rehacer,
+        'filtro_modelo': estado_filtro_modelo(),
         'modo_prompt': IMAGEN_MODO_PROMPT,
         'ultimo_error': ({'relato': fila_error[0], 'error': fila_error[1], 'cuando': fila_error[2]}
                          if fila_error else None),
@@ -3003,9 +3092,10 @@ def detalle_imagenes():
     """Cadena completa por relato (para revisión y para el registro de la obra)."""
     conn = get_conn()
     c = conn.cursor()
-    c.execute('''SELECT id, respuesta_id, estado, intentos, conceptos, prompt, negative_prompt,
-        modelo_texto, modelo_imagen, parametros, semilla, prediccion_id, error, creada, generada
-        FROM imagenes ORDER BY respuesta_id''')
+    c.execute('''SELECT i.id, i.respuesta_id, i.estado, i.intentos, i.conceptos, i.prompt,
+        i.negative_prompt, i.modelo_texto, i.modelo_imagen, i.parametros, i.semilla,
+        i.prediccion_id, i.error, i.creada, i.generada, r.relato
+        FROM imagenes i LEFT JOIN respuestas r ON r.id = i.respuesta_id ORDER BY i.respuesta_id''')
     columnas = [d[0] for d in c.description]
     filas = [dict(zip(columnas, f)) for f in c.fetchall()]
     conn.close()
@@ -3036,7 +3126,27 @@ def _accion_relato(respuesta_id, sql, parametros=()):
 @requiere_admin
 def ocultar_imagen(respuesta_id):
     return _accion_relato(respuesta_id,
-        "UPDATE imagenes SET estado = 'oculta' WHERE estado = 'lista' AND respuesta_id = %s")
+        "UPDATE imagenes SET estado = 'oculta', rehacer = FALSE WHERE estado IN ('lista', 'por_revisar') AND respuesta_id = %s")
+
+
+@app.route('/imagenes/relato/<int:respuesta_id>/aprobar', methods=['POST'])
+@requiere_admin
+def aprobar_imagen(respuesta_id):
+    return _accion_relato(respuesta_id,
+        "UPDATE imagenes SET estado = 'lista' WHERE estado = 'por_revisar' AND respuesta_id = %s")
+
+
+@app.route('/imagenes/moderacion_previa', methods=['POST'])
+@requiere_admin
+def cambiar_moderacion_previa():
+    """?activa=1 o ?activa=0."""
+    activa = request.args.get('activa') == '1'
+    conn = get_conn()
+    c = conn.cursor()
+    _escribir_config(c, 'moderacion_previa', '1' if activa else '0')
+    conn.commit()
+    conn.close()
+    return jsonify({'status': 'ok', 'moderacion_previa': activa})
 
 
 @app.route('/imagenes/relato/<int:respuesta_id>/mostrar', methods=['POST'])
