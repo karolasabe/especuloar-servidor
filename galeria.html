@@ -273,8 +273,8 @@ const SOBRE = {
       ingles: 'El modelo fue entrenado sobre todo con descripciones en inglés; por eso recibe la traducción. Lee sus primeros 77 tokens, aproximadamente las primeras 50 palabras.',
     },
     filtro: {
-      desactivado: 'Ninguna imagen se elimina por su contenido, con una excepción: toda imagen que muestre a una persona menor de edad desnuda o en un contexto sexual se elimina sin guardarse y se genera otra. Las imágenes con desnudez o contenido sexual, o con muchas letras simuladas, pasan por una revisión humana antes de publicarse.',
-      activo: 'El modelo aplica su propio filtro de contenido, que bloquea imágenes con desnudos o contenido sexual; cuando eso ocurre, se genera otra imagen. Fuera de eso, ninguna imagen se elimina por su contenido, salvo las que muestren a una persona menor de edad desnuda o en un contexto sexual. Las imágenes con muchas letras simuladas pasan por una revisión humana antes de publicarse.',
+      desactivado: 'Ninguna imagen se elimina por su contenido, con una excepción: toda imagen que muestre a una persona menor de edad desnuda o en un contexto sexual se elimina sin guardarse y se genera otra. Las imágenes compuestas casi solo por letras simuladas también se descartan y se genera otra. Las imágenes con desnudez o contenido sexual, o con bastantes letras simuladas, pasan por una revisión humana antes de publicarse.',
+      activo: 'El modelo aplica su propio filtro de contenido, que bloquea imágenes con desnudos o contenido sexual; cuando eso ocurre, se genera otra imagen. Fuera de eso, ninguna imagen se elimina por su contenido, salvo las que muestren a una persona menor de edad desnuda o en un contexto sexual. Las imágenes compuestas casi solo por letras simuladas se descartan y se genera otra; las que tienen bastantes letras simuladas pasan por una revisión humana antes de publicarse.',
     },
   },
   en: {
@@ -291,8 +291,8 @@ const SOBRE = {
       ingles: 'The model was trained mostly on English descriptions, which is why it receives the translation. It reads its first 77 tokens, roughly the first 50 words.',
     },
     filtro: {
-      desactivado: 'No image is removed for its content, with one exception: any image showing a minor naked or in a sexual context is deleted without being stored and another one is generated. Images with nudity or sexual content, or with many simulated letters, go through human review before being published.',
-      activo: 'The model applies its own content filter, which blocks images with nudity or sexual content; when that happens, another image is generated. Beyond that, no image is removed for its content, except those showing a minor naked or in a sexual context. Images with many simulated letters go through human review before being published.',
+      desactivado: 'No image is removed for its content, with one exception: any image showing a minor naked or in a sexual context is deleted without being stored and another one is generated. Images made up almost entirely of simulated letters are also discarded and another one is generated. Images with nudity or sexual content, or with a good amount of simulated letters, go through human review before being published.',
+      activo: 'The model applies its own content filter, which blocks images with nudity or sexual content; when that happens, another image is generated. Beyond that, no image is removed for its content, except those showing a minor naked or in a sexual context. Images made up almost entirely of simulated letters are discarded and another one is generated; those with a good amount of simulated letters go through human review before being published.',
     },
   },
 }[IDIOMA];

@@ -105,6 +105,9 @@ IMAGEN_NEGATIVE_PROMPT = os.environ.get('IMAGEN_NEGATIVE_PROMPT', 'text, waterma
 # se guarda y pasa al panel de moderación ("por revisar") antes de publicarse.
 IMAGEN_NEGATIVE_SIN_TEXTO = os.environ.get('IMAGEN_NEGATIVE_SIN_TEXTO', '')
 IMAGEN_TEXTO_MAX_PORCENTAJE = int(os.environ.get('IMAGEN_TEXTO_MAX_PORCENTAJE', '20'))
+# Sobre este tope la imagen es casi pura escritura simulada (una "cita" o
+# lámina de texto): no se guarda y se genera otra con otra semilla.
+IMAGEN_TEXTO_DESCARTAR_PORCENTAJE = int(os.environ.get('IMAGEN_TEXTO_DESCARTAR_PORCENTAJE', '40'))
 # Cómo se arma el prompt:
 #   'relato' (por omisión): el modelo recibe el relato tal como llegó, sin
 #     extracción, sin plantilla, sin línea de estilo y sin negative prompt.
@@ -2501,6 +2504,8 @@ def revisar_imagen(datos, mime):
         raise ErrorImagen('revisión de la imagen: respuesta ilegible; la imagen no se guarda')
     # El motivo queda registrado para revisar falsos positivos.
     revisar_imagen.ultimo_motivo = str(datos_r.get('motivo') or '')[:200]
+    revisar_imagen.ultimo_porcentaje = round(porcentaje)
+    revisar_imagen.texto_excesivo = porcentaje > IMAGEN_TEXTO_DESCARTAR_PORCENTAJE
     notas = []
     if sexual and not menor:
         notas.append('desnudez o contenido sexual')
@@ -2792,6 +2797,13 @@ def procesar_imagen(trabajo):
                               prompt, revisar_imagen.ultimo_motivo)
             raise ErrorImagen('protección de menores: imagen eliminada sin guardar ('
                               + revisar_imagen.ultimo_motivo + '); se intenta con otra semilla')
+        if revisar_imagen.texto_excesivo:
+            _sumar_consumo('texto_descartadas')
+            _registrar_evento(respuesta_id, 'galeria', 'texto_descartada', idioma_usado, semilla, prompt,
+                              f'escritura simulada en {revisar_imagen.ultimo_porcentaje}% de la imagen | '
+                              + revisar_imagen.ultimo_motivo)
+            raise ErrorImagen(f'imagen dominada por escritura simulada ({revisar_imagen.ultimo_porcentaje}%, '
+                              f'tope {IMAGEN_TEXTO_DESCARTAR_PORCENTAJE}%): no se guarda; se intenta con otra semilla')
         if notas:
             _sumar_consumo('enviadas_a_revision')
             _registrar_evento(respuesta_id, 'galeria', 'a_revision', idioma_usado, semilla, prompt,
@@ -3209,6 +3221,7 @@ def estado_imagenes():
     replicate_hoy = _consumo_hoy(c, SERVICIO_REPLICATE)
     menores_hoy = _consumo_hoy(c, 'menores_descartadas')
     revision_hoy = _consumo_hoy(c, 'enviadas_a_revision')
+    texto_hoy = _consumo_hoy(c, 'texto_descartadas')
     c.execute('SELECT tipo, COUNT(*) FROM registro_bloqueos GROUP BY tipo')
     registro_por_tipo = dict(c.fetchall())
     previa = _moderacion_previa(c)
@@ -3237,6 +3250,7 @@ def estado_imagenes():
         'traducir_al_ingles': al_ingles,
         'descartadas_proteccion_menores_hoy': menores_hoy,
         'enviadas_a_revision_hoy': revision_hoy,
+        'descartadas_por_texto_hoy': texto_hoy,
         'registro_por_tipo': registro_por_tipo,
         'texto_max_porcentaje': IMAGEN_TEXTO_MAX_PORCENTAJE,
         'detenido_por': bloqueo,
@@ -3428,10 +3442,15 @@ def _procesar_comparaciones():
                                   + revisar_imagen.ultimo_motivo)
                 else:
                     # Lo que en la galería pasaría por revisión se muestra, anotado.
+                    if revisar_imagen.texto_excesivo:
+                        nota_c = (f'escritura simulada en {revisar_imagen.ultimo_porcentaje}% de la imagen: '
+                                  'en la galería se descartaría')
+                    elif notas:
+                        nota_c = '; '.join(notas) + ': en la galería pasaría por revisión'
+                    else:
+                        nota_c = None
                     campos.update(estado='lista', datos=psycopg2.Binary(resultado['datos']),
-                                  mime=resultado['mime'], generada=_ahora().isoformat(),
-                                  error=('; '.join(notas) + ': en la galería pasaría por revisión')
-                                  if notas else None)
+                                  mime=resultado['mime'], generada=_ahora().isoformat(), error=nota_c)
             except ErrorCuenta as e:
                 _bloquear(str(e), e.espera, e.servicio)
                 campos.update(estado='pendiente', error=str(e)[:500])

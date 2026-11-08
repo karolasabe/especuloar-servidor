@@ -269,10 +269,10 @@ function pintarControles() {
   $('v-cuentas').classList.toggle('alerta', porRevisar > 0);
   const filtro = { desactivado: 'desactivado', activo: 'activo (el modelo no permite apagarlo)', desconocido: 'sin confirmar' }[estado.filtro_modelo] || '...';
   $('v-detalle').textContent = `${pe.oculta || 0} ocultas, ${(pe.pendiente || 0) + (pe.generando || 0)} en cola, ${pe.fallida || 0} fallidas. `
-    + `Hoy: ${estado.imagenes_hoy || 0} de ${estado.tope_diario || 0} imágenes, ${estado.enviadas_a_revision_hoy || 0} enviadas a revisión por su contenido, ${estado.descartadas_proteccion_menores_hoy || 0} eliminadas por protección de menores. `
+    + `Hoy: ${estado.imagenes_hoy || 0} de ${estado.tope_diario || 0} imágenes, ${estado.enviadas_a_revision_hoy || 0} enviadas a revisión por su contenido, ${estado.descartadas_por_texto_hoy || 0} descartadas por estar hechas casi solo de texto, ${estado.descartadas_proteccion_menores_hoy || 0} eliminadas por protección de menores. `
     + `Filtro del modelo: ${filtro}.`;
   const rt = estado.registro_por_tipo || {};
-  $('v-registro').textContent = `${rt.filtro_modelo || 0} bloqueos del filtro del modelo, ${rt.proteccion_menores || 0} eliminaciones por protección de menores, ${rt.a_revision || 0} envíos a revisión.`;
+  $('v-registro').textContent = `${rt.filtro_modelo || 0} bloqueos del filtro del modelo, ${rt.proteccion_menores || 0} eliminaciones por protección de menores, ${rt.texto_descartada || 0} descartadas por texto, ${rt.a_revision || 0} envíos a revisión.`;
   for (const b of document.querySelectorAll('.vistas button')) b.setAttribute('aria-pressed', b.dataset.vista === vista);
 }
 
