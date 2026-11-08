@@ -259,7 +259,7 @@ function pintarControles() {
   $('v-cuentas').classList.toggle('alerta', porRevisar > 0);
   const filtro = { desactivado: 'desactivado', activo: 'activo (el modelo no permite apagarlo)', desconocido: 'sin confirmar' }[estado.filtro_modelo] || '...';
   $('v-detalle').textContent = `${pe.oculta || 0} ocultas, ${(pe.pendiente || 0) + (pe.generando || 0)} en cola, ${pe.fallida || 0} fallidas. `
-    + `Hoy: ${estado.imagenes_hoy || 0} de ${estado.tope_diario || 0} imágenes, ${estado.descartadas_proteccion_menores_hoy || 0} descartadas por protección de menores, ${estado.descartadas_texto_hoy || 0} por texto simulado. `
+    + `Hoy: ${estado.imagenes_hoy || 0} de ${estado.tope_diario || 0} imágenes, ${estado.enviadas_a_revision_hoy || 0} enviadas a revisión por su contenido, ${estado.descartadas_proteccion_menores_hoy || 0} eliminadas por protección de menores. `
     + `Filtro del modelo: ${filtro}.`;
   for (const b of document.querySelectorAll('.vistas button')) b.setAttribute('aria-pressed', b.dataset.vista === vista);
 }
@@ -322,6 +322,12 @@ function pintarGrilla() {
     const linea = document.createElement('div');
     linea.className = 'linea';
     linea.innerHTML = `<span>relato ${f.respuesta_id}</span><span class="estado ${f.estado}">${NOMBRES[f.estado] || f.estado}</span>`;
+    let nota = null;
+    if (f.nota) {
+      nota = document.createElement('div');
+      nota.className = 'gris'; nota.style.marginTop = '4px';
+      nota.textContent = '(' + f.nota + ')';
+    }
     const acciones = document.createElement('div');
     acciones.className = 'acciones';
     if (f.estado === 'por_revisar') acciones.append(boton('(aprobar)', () => accionRelato(f.respuesta_id, 'aprobar')));
@@ -336,7 +342,9 @@ function pintarGrilla() {
     const p = document.createElement('span'); p.className = 'rotulo'; p.textContent = 'lo que recibió el modelo';
     const tp = document.createTextNode(f.prompt || '');
     texto.append(r, tr, p, tp);
-    t.append(foto, linea, acciones, texto);
+    t.append(foto, linea);
+    if (nota) t.append(nota);
+    t.append(acciones, texto);
     grilla.appendChild(t);
   }
 }

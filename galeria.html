@@ -258,8 +258,8 @@ const SOBRE = {
   es: {
     boton: '(sobre las imágenes)', titulo: 'SOBRE LAS IMÁGENES',
     inicio: {
-      original: 'Cada imagen se generó automáticamente a partir de un relato. El texto entra tal como fue escrito, en su idioma, al modelo Stable Diffusion 1.5, sin edición y con una sola instrucción adicional: evitar letras y textos en la imagen. Nadie elige ni retoca el resultado.',
-      ingles: 'Cada imagen se generó automáticamente a partir de un relato. El texto se traduce al inglés de forma literal y entra así al modelo Stable Diffusion 1.5, sin edición y con una sola instrucción adicional: evitar letras y textos en la imagen. Nadie elige ni retoca el resultado.',
+      original: 'Cada imagen se generó automáticamente a partir de un relato. El texto entra tal como fue escrito, en su idioma, al modelo Stable Diffusion 1.5, sin edición ni instrucciones adicionales, y nadie elige ni retoca el resultado.',
+      ingles: 'Cada imagen se generó automáticamente a partir de un relato. El texto se traduce al inglés de forma literal y entra así al modelo Stable Diffusion 1.5, sin edición ni instrucciones adicionales, y nadie elige ni retoca el resultado.',
     },
     parrafos: [
       'Ese modelo aprendió a vincular palabras e imágenes a partir de pares de imagen y texto recopilados de internet: fotografías, ilustraciones, publicidad, noticias y foros, junto a las descripciones que personas escribieron para ellas. Fue entrenado sobre subconjuntos de LAION-2B(en), la porción en inglés de LAION-5B, un conjunto de unos 5.850 millones de pares de imagen y texto extraídos de Common Crawl y seleccionados en parte por un modelo que puntúa la calidad estética. Lo que aparece en cada imagen viene de esas asociaciones humanas acumuladas en internet.',
@@ -269,15 +269,15 @@ const SOBRE = {
       ingles: 'El modelo fue entrenado sobre todo con descripciones en inglés; por eso recibe la traducción. Lee sus primeros 77 tokens, aproximadamente las primeras 50 palabras.',
     },
     filtro: {
-      desactivado: 'Las imágenes no pasan por filtros de contenido, con una excepción: se descarta toda imagen que muestre a una persona menor de edad desnuda o en un contexto sexual. También se descartan las imágenes con letras o textos simulados; en ambos casos se genera otra.',
-      activo: 'El modelo aplica su propio filtro de contenido, que bloquea imágenes con desnudos o contenido sexual; cuando eso ocurre, se genera otra imagen. Además, se descarta toda imagen que muestre a una persona menor de edad desnuda o en un contexto sexual, y toda imagen con letras o textos simulados; en ambos casos se genera otra.',
+      desactivado: 'Ninguna imagen se elimina por su contenido, con una excepción: toda imagen que muestre a una persona menor de edad desnuda o en un contexto sexual se elimina sin guardarse y se genera otra. Las imágenes con desnudez o contenido sexual, o con muchas letras simuladas, pasan por una revisión humana antes de publicarse.',
+      activo: 'El modelo aplica su propio filtro de contenido, que bloquea imágenes con desnudos o contenido sexual; cuando eso ocurre, se genera otra imagen. Fuera de eso, ninguna imagen se elimina por su contenido, salvo las que muestren a una persona menor de edad desnuda o en un contexto sexual. Las imágenes con muchas letras simuladas pasan por una revisión humana antes de publicarse.',
     },
   },
   en: {
     boton: '(about the images)', titulo: 'ABOUT THE IMAGES',
     inicio: {
-      original: 'Each image was generated automatically from a testimony. The text goes into the Stable Diffusion 1.5 model exactly as it was written, in its own language, with no editing and a single added instruction: avoid letters and text in the image. No one selects or retouches the result.',
-      ingles: 'Each image was generated automatically from a testimony. The text is translated literally into English and goes into the Stable Diffusion 1.5 model that way, with no editing and a single added instruction: avoid letters and text in the image. No one selects or retouches the result.',
+      original: 'Each image was generated automatically from a testimony. The text goes into the Stable Diffusion 1.5 model exactly as it was written, in its own language, with no editing or added instructions, and no one selects or retouches the result.',
+      ingles: 'Each image was generated automatically from a testimony. The text is translated literally into English and goes into the Stable Diffusion 1.5 model that way, with no editing or added instructions, and no one selects or retouches the result.',
     },
     parrafos: [
       'The model learned to link words and images from image and text pairs collected from the internet: photographs, illustrations, advertising, news and forums, together with the descriptions people wrote for them. It was trained on subsets of LAION-2B(en), the English portion of LAION-5B, a set of about 5.85 billion image and text pairs extracted from Common Crawl and partly selected by a model that scores aesthetic quality. What appears in each image comes from those human associations accumulated on the internet.',
@@ -287,8 +287,8 @@ const SOBRE = {
       ingles: 'The model was trained mostly on English descriptions, which is why it receives the translation. It reads its first 77 tokens, roughly the first 50 words.',
     },
     filtro: {
-      desactivado: 'The images pass through no content filters, with one exception: any image showing a minor naked or in a sexual context is discarded. Images with simulated letters or text are also discarded; in both cases another one is generated.',
-      activo: 'The model applies its own content filter, which blocks images with nudity or sexual content; when that happens, another image is generated. In addition, any image showing a minor naked or in a sexual context is discarded, as is any image with simulated letters or text; in both cases another one is generated.',
+      desactivado: 'No image is removed for its content, with one exception: any image showing a minor naked or in a sexual context is deleted without being stored and another one is generated. Images with nudity or sexual content, or with many simulated letters, go through human review before being published.',
+      activo: 'The model applies its own content filter, which blocks images with nudity or sexual content; when that happens, another image is generated. Beyond that, no image is removed for its content, except those showing a minor naked or in a sexual context. Images with many simulated letters go through human review before being published.',
     },
   },
 }[IDIOMA];

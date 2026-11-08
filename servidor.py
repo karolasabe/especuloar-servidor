@@ -99,13 +99,12 @@ IMAGEN_PARAMETROS = {
 # quality empujaban al modelo hacia imágenes pulidas y fuera de la crudeza de
 # los relatos.
 IMAGEN_NEGATIVE_PROMPT = os.environ.get('IMAGEN_NEGATIVE_PROMPT', 'text, watermark, signature')
-# Sin texto simulado: el modelo tiende a escribir letras ilegibles y a armar
-# afiches. Se le pide evitarlo y, si igual aparece, la imagen se descarta.
-IMAGEN_SIN_TEXTO = os.environ.get('IMAGEN_SIN_TEXTO', '1') == '1'
-IMAGEN_NEGATIVE_SIN_TEXTO = os.environ.get(
-    'IMAGEN_NEGATIVE_SIN_TEXTO',
-    'text, letters, words, writing, typography, caption, sign, poster, banner, placard, '
-    'watermark, signature')
+# Nada se evita ni se borra por su contenido, salvo la protección de menores.
+# Una imagen con desnudez o contenido sexual de personas adultas, o con
+# letras simuladas en más que IMAGEN_TEXTO_MAX_PORCENTAJE de su superficie,
+# se guarda y pasa al panel de moderación ("por revisar") antes de publicarse.
+IMAGEN_NEGATIVE_SIN_TEXTO = os.environ.get('IMAGEN_NEGATIVE_SIN_TEXTO', '')
+IMAGEN_TEXTO_MAX_PORCENTAJE = int(os.environ.get('IMAGEN_TEXTO_MAX_PORCENTAJE', '20'))
 # Cómo se arma el prompt:
 #   'relato' (por omisión): el modelo recibe el relato tal como llegó, sin
 #     extracción, sin plantilla, sin línea de estilo y sin negative prompt.
@@ -130,23 +129,21 @@ IMAGEN_SIN_FILTRO_MODELO = os.environ.get('IMAGEN_SIN_FILTRO_MODELO', '1') == '1
 # edad desnuda o en un contexto sexual. No tiene interruptor.
 _SISTEMA_MENORES = (
     'Revisas imágenes generadas automáticamente para una obra de arte sobre experiencias '
-    'ginecológicas. Tu única tarea es detectar material de abuso sexual infantil.')
+    'ginecológicas. Describes su contenido para el panel de moderación de la obra y detectas '
+    'material de abuso sexual infantil, que es lo único que se elimina.')
 _PEDIDO_MENORES = (
-    'Revisa la imagen y responde dos preguntas independientes.\n'
-    'A) Protección de menores, en dos pasos. Primero: ¿hay en la imagen desnudez total o '
-    'parcial, genitales, pecho, nalgas u otras partes íntimas expuestas o visibles, una escena '
-    'de violencia sexual (como una violación o un abuso), un acto sexual o una pose '
-    'explícitamente pornográfica? Si no hay nada de eso, descartar = false, aunque aparezcan '
-    'niñas o niños vestidos, multitudes, rostros o escenas perturbadoras. Segundo, solo si hay '
-    'algo de lo anterior: descartar = true si la persona involucrada aparenta ser menor de 18 '
-    'años o si no puedes determinar su edad. Violencia sin contenido sexual, sangre, carne, '
-    'anatomía y desnudez de personas claramente adultas no son motivo para descartar.\n'
-    'B) Texto: texto = true si en la imagen se ven letras, palabras o seudoletras de forma '
-    'notoria (carteles, pancartas, afiches, titulares, rótulos, grafitis, texto sobre la '
-    'imagen) o si la imagen está compuesta como un afiche. Marcas mínimas o ilegibles en un '
-    'objeto pequeño del fondo no cuentan.\n'
-    'Responde SOLO un JSON {"descartar": true o false, "motivo": "una frase breve que '
-    'describa lo que ves, sin detalles gráficos", "texto": true o false}.')
+    'Revisa la imagen y responde tres preguntas.\n'
+    'A) ¿Hay desnudez total o parcial, genitales, pecho, nalgas u otras partes íntimas expuestas '
+    'o visibles, una escena de violencia sexual (como una violación o un abuso), un acto sexual o '
+    'una pose explícitamente pornográfica? Responde sexual = true o false.\n'
+    'B) Solo si A es true: ¿la persona involucrada aparenta ser menor de 18 años, o no puedes '
+    'determinar su edad? Responde menor = true o false. Si A es false, menor = false.\n'
+    'C) Estima qué porcentaje de la superficie de la imagen ocupan letras, palabras o seudoletras, '
+    'sumando todas las zonas con escritura (0 si no hay). Cuenta solo la escritura, no los '
+    'objetos que la llevan.\n'
+    'Responde SOLO un JSON {"sexual": true o false, "menor": true o false, "texto_porcentaje": '
+    'un número entre 0 y 100, "motivo": "una frase breve que describa lo que ves, sin detalles '
+    'gráficos"}.')
 # Tope diario de llamadas a Replicate: protege el presupuesto si llegan
 # envíos masivos mientras nadie mira.
 IMAGEN_MAX_DIA = int(os.environ.get('IMAGEN_MAX_DIA', '300'))
@@ -1702,6 +1699,8 @@ def init_db():
     # Rehacer una imagen sin sacarla de la galería: sigue a la vista hasta que
     # la nueva la reemplaza.
     c.execute('''ALTER TABLE imagenes ADD COLUMN IF NOT EXISTS rehacer BOOLEAN NOT NULL DEFAULT FALSE''')
+    # Por qué una imagen pasó a revisión (contenido sexual adulto, texto simulado).
+    c.execute('''ALTER TABLE imagenes ADD COLUMN IF NOT EXISTS nota TEXT''')
     # Prueba de idioma: el mismo relato en su idioma y traducido al inglés,
     # con la misma semilla. No se publica; solo se ve en el panel.
     c.execute('''CREATE TABLE IF NOT EXISTS comparaciones (
@@ -2451,9 +2450,11 @@ def estado_filtro_modelo():
 
 
 def revisar_imagen(datos, mime):
-    """Una sola consulta revisa la protección de menores y el texto simulado.
-    Devuelve (menores, texto). Ante cualquier duda (respuesta ilegible,
-    error), la imagen no se guarda."""
+    """Una sola consulta por imagen. Devuelve (eliminar, notas): eliminar es
+    verdadero solo si hay contenido sexual con una persona que aparenta ser
+    menor de edad; notas lista lo que manda la imagen a revisión (contenido
+    sexual de personas adultas, texto simulado sobre el tope). Ante una
+    respuesta ilegible la imagen no se guarda."""
     contenido = [
         {'type': 'image', 'source': {'type': 'base64', 'media_type': mime,
                                      'data': base64.b64encode(datos).decode('ascii')}},
@@ -2462,13 +2463,19 @@ def revisar_imagen(datos, mime):
     texto = _claude(_SISTEMA_MENORES, contenido, max_tokens=4000)
     try:
         datos_r = _json_de_respuesta(texto)
-        descartar = bool(datos_r['descartar'])
-        con_texto = bool(datos_r.get('texto'))
+        sexual = bool(datos_r['sexual'])
+        menor = sexual and bool(datos_r.get('menor'))
+        porcentaje = float(datos_r.get('texto_porcentaje') or 0)
     except Exception:
         raise ErrorImagen('revisión de la imagen: respuesta ilegible; la imagen no se guarda')
-    # El motivo queda registrado para revisar falsos positivos; la imagen no.
+    # El motivo queda registrado para revisar falsos positivos.
     revisar_imagen.ultimo_motivo = str(datos_r.get('motivo') or '')[:200]
-    return descartar, con_texto
+    notas = []
+    if sexual and not menor:
+        notas.append('desnudez o contenido sexual')
+    if porcentaje > IMAGEN_TEXTO_MAX_PORCENTAJE:
+        notas.append(f'texto simulado en {round(porcentaje)}% de la imagen')
+    return menor, notas
 
 
 def _entrada_para_modelo(prompt, semilla):
@@ -2477,7 +2484,7 @@ def _entrada_para_modelo(prompt, semilla):
     entrada = dict(IMAGEN_PARAMETROS)
     entrada['prompt'] = prompt
     if IMAGEN_MODO_PROMPT == 'relato':
-        if IMAGEN_SIN_TEXTO and IMAGEN_NEGATIVE_SIN_TEXTO.strip():
+        if IMAGEN_NEGATIVE_SIN_TEXTO.strip():
             entrada['negative_prompt'] = IMAGEN_NEGATIVE_SIN_TEXTO
     elif IMAGEN_NEGATIVE_PROMPT.strip():
         entrada['negative_prompt'] = IMAGEN_NEGATIVE_PROMPT
@@ -2740,19 +2747,19 @@ def procesar_imagen(trabajo):
             _actualizar_imagen(imagen_id, prompt=prompt, modelo_texto=IMAGEN_MODELO_TEXTO)
         semilla = secrets.randbelow(2 ** 31)
         resultado = generar_en_replicate(prompt, semilla)
-        menores, con_texto = revisar_imagen(resultado['datos'], resultado['mime'])
-        if menores:
+        eliminar, notas = revisar_imagen(resultado['datos'], resultado['mime'])
+        if eliminar:
             _sumar_consumo('menores_descartadas')
-            raise ErrorImagen('protección de menores: imagen descartada sin guardar ('
+            raise ErrorImagen('protección de menores: imagen eliminada sin guardar ('
                               + revisar_imagen.ultimo_motivo + '); se intenta con otra semilla')
-        if con_texto and IMAGEN_SIN_TEXTO:
-            _sumar_consumo('texto_descartadas')
-            raise ErrorImagen('texto simulado en la imagen; se intenta con otra semilla')
+        if notas:
+            _sumar_consumo('enviadas_a_revision')
         conn = get_conn()
         previa = _moderacion_previa(conn.cursor())
         conn.close()
         _actualizar_imagen(
-            imagen_id, estado='por_revisar' if previa else 'lista',
+            imagen_id, estado='por_revisar' if (previa or notas) else 'lista',
+            nota='; '.join(notas) or None,
             datos=psycopg2.Binary(resultado['datos']),
             mime=resultado['mime'], semilla=semilla, prediccion_id=resultado['prediccion_id'],
             modelo_imagen=resultado['modelo'], negative_prompt=resultado['negative_prompt'],
@@ -3148,7 +3155,7 @@ def estado_imagenes():
     bloqueo = _bloqueo_vigente(c)
     replicate_hoy = _consumo_hoy(c, SERVICIO_REPLICATE)
     menores_hoy = _consumo_hoy(c, 'menores_descartadas')
-    texto_hoy = _consumo_hoy(c, 'texto_descartadas')
+    revision_hoy = _consumo_hoy(c, 'enviadas_a_revision')
     previa = _moderacion_previa(c)
     al_ingles = _leer_config(c, 'traducir_al_ingles') == '1'
     anthropic_hoy = _consumo_hoy(c, 'anthropic')
@@ -3174,8 +3181,8 @@ def estado_imagenes():
         'moderacion_previa': previa,
         'traducir_al_ingles': al_ingles,
         'descartadas_proteccion_menores_hoy': menores_hoy,
-        'descartadas_texto_hoy': texto_hoy,
-        'sin_texto': IMAGEN_SIN_TEXTO,
+        'enviadas_a_revision_hoy': revision_hoy,
+        'texto_max_porcentaje': IMAGEN_TEXTO_MAX_PORCENTAJE,
         'detenido_por': bloqueo,
         'token_replicate': formato_token_replicate(),
         'por_estado': conteo,
@@ -3201,7 +3208,7 @@ def detalle_imagenes():
     c = conn.cursor()
     c.execute('''SELECT i.id, i.respuesta_id, i.estado, i.intentos, i.conceptos, i.prompt,
         i.negative_prompt, i.modelo_texto, i.modelo_imagen, i.parametros, i.semilla,
-        i.prediccion_id, i.error, i.creada, i.generada, r.relato
+        i.prediccion_id, i.error, i.creada, i.generada, r.relato, i.nota
         FROM imagenes i LEFT JOIN respuestas r ON r.id = i.respuesta_id ORDER BY i.respuesta_id''')
     columnas = [d[0] for d in c.description]
     filas = [dict(zip(columnas, f)) for f in c.fetchall()]
@@ -3355,16 +3362,17 @@ def _procesar_comparaciones():
                 prompt = ' '.join(texto.split())[:IMAGEN_RELATO_MAX_CARACTERES]
                 campos['prompt'] = prompt
                 resultado = generar_en_replicate(prompt, semilla)
-                menores, con_texto = revisar_imagen(resultado['datos'], resultado['mime'])
-                if menores:
+                eliminar, notas = revisar_imagen(resultado['datos'], resultado['mime'])
+                if eliminar:
                     _sumar_consumo('menores_descartadas')
                     campos.update(estado='descartada', error='protección de menores: '
                                   + revisar_imagen.ultimo_motivo)
                 else:
-                    # En la comparación la imagen con texto se muestra, marcada.
+                    # Lo que en la galería pasaría por revisión se muestra, anotado.
                     campos.update(estado='lista', datos=psycopg2.Binary(resultado['datos']),
                                   mime=resultado['mime'], generada=_ahora().isoformat(),
-                                  error='con texto: en la galería se descartaría' if con_texto else None)
+                                  error=('; '.join(notas) + ': en la galería pasaría por revisión')
+                                  if notas else None)
             except ErrorCuenta as e:
                 _bloquear(str(e), e.espera, e.servicio)
                 campos.update(estado='pendiente', error=str(e)[:500])
