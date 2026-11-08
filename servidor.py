@@ -2445,7 +2445,7 @@ def revisar_menores(datos, mime):
                                      'data': base64.b64encode(datos).decode('ascii')}},
         {'type': 'text', 'text': _PEDIDO_MENORES},
     ]
-    texto = _claude(_SISTEMA_MENORES, contenido, max_tokens=200)
+    texto = _claude(_SISTEMA_MENORES, contenido, max_tokens=4000)
     try:
         return bool(_json_de_respuesta(texto)['descartar'])
     except Exception:
