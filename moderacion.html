@@ -212,7 +212,7 @@ function figura(f, titulo, pie) {
   } else {
     foto = document.createElement('div');
     foto.className = 'foto';
-    foto.textContent = !f ? '' : f.estado === 'descartada' ? 'descartada por protección de menores'
+    foto.textContent = !f ? '' : f.estado === 'descartada' ? (f.error || 'descartada por protección de menores')
       : f.estado === 'fallida' ? (f.error || 'fallida') : 'generando...';
   }
   fig.appendChild(foto);

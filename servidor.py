@@ -125,15 +125,17 @@ _SISTEMA_MENORES = (
     'Revisas imágenes generadas automáticamente para una obra de arte sobre experiencias '
     'ginecológicas. Tu única tarea es detectar material de abuso sexual infantil.')
 _PEDIDO_MENORES = (
-    'Revisa la imagen con el criterio más restrictivo. Responde descartar = true si aparece '
-    'alguna persona que aparente ser menor de 18 años y se cumple cualquiera de estas '
-    'condiciones: tiene los genitales, el pecho, las nalgas u otras partes íntimas expuestas '
-    'o visibles, aunque sea parcialmente; está desnuda o semidesnuda; hay una escena de '
-    'violencia sexual, como una violación o un abuso; hay un acto sexual; o aparece en una '
-    'pose explícitamente pornográfica. Si no puedes determinar si la persona es menor de edad, '
-    'considérala menor. Violencia sin contenido sexual, sangre, carne, anatomía, desnudez de '
-    'personas claramente adultas o imágenes perturbadoras no son motivo para descartar. '
-    'Responde SOLO un JSON {"descartar": true} o {"descartar": false}.')
+    'Revisa la imagen en dos pasos. Primero: ¿hay en la imagen desnudez total o parcial, '
+    'genitales, pecho, nalgas u otras partes íntimas expuestas o visibles, una escena de '
+    'violencia sexual (como una violación o un abuso), un acto sexual o una pose '
+    'explícitamente pornográfica? Si no hay nada de eso, responde descartar = false, aunque '
+    'aparezcan niñas o niños vestidos, multitudes, rostros o escenas perturbadoras. '
+    'Segundo, solo si hay algo de lo anterior: responde descartar = true si la persona '
+    'involucrada aparenta ser menor de 18 años o si no puedes determinar su edad. '
+    'Violencia sin contenido sexual, sangre, carne, anatomía y desnudez de personas '
+    'claramente adultas no son motivo para descartar. Responde SOLO un JSON '
+    '{"descartar": true o false, "motivo": "una frase breve que describa lo que ves, sin '
+    'detalles gráficos"}.')
 # Tope diario de llamadas a Replicate: protege el presupuesto si llegan
 # envíos masivos mientras nadie mira.
 IMAGEN_MAX_DIA = int(os.environ.get('IMAGEN_MAX_DIA', '300'))
@@ -2447,9 +2449,14 @@ def revisar_menores(datos, mime):
     ]
     texto = _claude(_SISTEMA_MENORES, contenido, max_tokens=4000)
     try:
-        return bool(_json_de_respuesta(texto)['descartar'])
+        datos_r = _json_de_respuesta(texto)
+        descartar = bool(datos_r['descartar'])
     except Exception:
         raise ErrorImagen('protección de menores: respuesta ilegible; la imagen no se guarda')
+    if descartar:
+        # El motivo queda registrado para revisar falsos positivos; la imagen no.
+        revisar_menores.ultimo_motivo = str(datos_r.get('motivo') or '')[:200]
+    return descartar
 
 
 def _entrada_para_modelo(prompt, semilla):
@@ -2720,8 +2727,8 @@ def procesar_imagen(trabajo):
         resultado = generar_en_replicate(prompt, semilla)
         if revisar_menores(resultado['datos'], resultado['mime']):
             _sumar_consumo('menores_descartadas')
-            raise ErrorImagen('protección de menores: imagen descartada sin guardar; '
-                              'se intenta con otra semilla')
+            raise ErrorImagen('protección de menores: imagen descartada sin guardar ('
+                              + getattr(revisar_menores, 'ultimo_motivo', '') + '); se intenta con otra semilla')
         conn = get_conn()
         previa = _moderacion_previa(conn.cursor())
         conn.close()
@@ -3328,7 +3335,8 @@ def _procesar_comparaciones():
                 resultado = generar_en_replicate(prompt, semilla)
                 if revisar_menores(resultado['datos'], resultado['mime']):
                     _sumar_consumo('menores_descartadas')
-                    campos.update(estado='descartada', error='protección de menores')
+                    campos.update(estado='descartada', error='protección de menores: '
+                                  + getattr(revisar_menores, 'ultimo_motivo', ''))
                 else:
                     campos.update(estado='lista', datos=psycopg2.Binary(resultado['datos']),
                                   mime=resultado['mime'], generada=_ahora().isoformat())
