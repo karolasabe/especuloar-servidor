@@ -2916,7 +2916,12 @@ def _bucle_imagenes():
                 if trabajo == 'cupo' and aviso_cupo != _ahora().date():
                     log.warning('imagenes: se alcanzó el tope diario de %s imágenes', IMAGEN_MAX_DIA)
                     aviso_cupo = _ahora().date()
-                # sin imágenes que generar, se adelantan las frases de la galería
+                # sin imágenes que generar, siguen las comparaciones de idioma
+                # pendientes (aunque el panel esté cerrado) y luego las frases
+                if trabajo is None and _hay_comparaciones_pendientes():
+                    _procesar_comparaciones()
+                    if _hay_comparaciones_pendientes() and not _bloqueado_ahora():
+                        continue
                 if procesar_frase_pendiente() in ('lista', 'fallo'):
                     continue
                 _evento_imagenes.wait(15 if trabajo is None else 60)
@@ -3261,6 +3266,29 @@ def rehacer_todas():
 
 
 _candado_comparacion = threading.Lock()
+
+
+def _hay_comparaciones_pendientes():
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        # si ninguna comparación está corriendo, una que quedó "generando"
+        # (reinicio del servidor a mitad de camino) vuelve a la cola
+        if not _candado_comparacion.locked():
+            c.execute("UPDATE comparaciones SET estado = 'pendiente' WHERE estado = 'generando'")
+        conn.commit()
+        c.execute("SELECT 1 FROM comparaciones WHERE estado = 'pendiente' LIMIT 1")
+        return c.fetchone() is not None
+    finally:
+        conn.close()
+
+
+def _bloqueado_ahora():
+    conn = get_conn()
+    try:
+        return bool(_bloqueo_vigente(conn.cursor()))
+    finally:
+        conn.close()
 
 
 def _procesar_comparaciones():

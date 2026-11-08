@@ -119,6 +119,7 @@ const API_BASE = new URLSearchParams(location.search).get('api') || 'https://esp
 let token = '';
 try { token = sessionStorage.getItem('especuloar_admin') || ''; } catch (e) {}
 let vista = 'por_revisar';
+try { vista = sessionStorage.getItem('especuloar_vista') || vista; } catch (e) {}
 let filas = [];
 let estado = {};
 const abiertas = new Set();
@@ -347,14 +348,20 @@ $('b-previa').addEventListener('click', async () => {
   actualizar();
 });
 for (const b of document.querySelectorAll('.vistas button')) {
-  b.addEventListener('click', () => {
-    vista = b.dataset.vista;
+  b.addEventListener('click', () => mostrarVista(b.dataset.vista));
+}
+function mostrarVista(v) {
+  {
+    vista = v;
+    try { sessionStorage.setItem('especuloar_vista', vista); } catch (e) {}
     $('grilla').style.display = vista === 'comparacion' ? 'none' : '';
     $('comparacion').style.display = vista === 'comparacion' ? 'block' : 'none';
     pintarControles();
+    if (!token) return;
     if (vista === 'comparacion') pintarComparaciones(); else pintarGrilla();
-  });
+  }
 }
+mostrarVista(vista);
 
 if (token) {
   $('entrada').style.display = 'none'; $('panel').style.display = 'block'; $('salir').hidden = false;
