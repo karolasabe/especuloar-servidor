@@ -2289,11 +2289,32 @@ def _idioma_relato(respuesta_id):
     return (fila[0] if fila else None) or 'es'
 
 
+def es_espanol(texto):
+    """Decide si un relato se traduce. Se traduce todo salvo lo que se
+    reconoce claramente como inglés o alemán; así un relato corto en español
+    sin palabras de enlace ("INJUSTO", "Tuve miedo.") igual se traduce."""
+    t = f' {(texto or "").lower()} '
+    espanol = ['que', 'con', 'una', 'por', 'para', 'como', 'pero', 'los', 'las', 'del',
+               'muy', 'sin', 'cuando', 'me', 'mi', 'el', 'la', 'es', 'y', 'lo', 'le', 'se',
+               'no', 'un', 'en', 'de', 'al', 'su', 'fue', 'yo', 'qué', 'porque']
+    ingles = ['the', 'and', 'that', 'with', 'for', 'this', 'but', 'are', 'was', 'have',
+              'i', 'it', 'my', 'me', 'very', 'not', 'is', 'of', 'to', 'felt']
+    aleman = ['und', 'ich', 'nicht', 'der', 'die', 'das', 'mit', 'ein', 'eine', 'war',
+              'sehr', 'mich', 'mir', 'wie', 'auf', 'zu', 'ist', 'es', 'kalt', 'habe',
+              'hat', 'hatte', 'tat', 'bin', 'aber', 'auch', 'wurde', 'weh']
+    puntos_es = sum(1 for p in espanol if f' {p} ' in t) + (2 if re.search('[ñ¿¡áéíóú]', t) else 0)
+    puntos_en = sum(1 for p in ingles if f' {p} ' in t)
+    puntos_de = sum(1 for p in aleman if f' {p} ' in t) + (2 if re.search('[äöüß]', t) else 0)
+    return puntos_es >= max(puntos_en, puntos_de)
+
+
 def traduccion_al_ingles(respuesta_id, relato):
     """Traducción literal al inglés, guardada en la tabla de traducciones (la
     misma que usa el botón de la galería). Si el relato ya está en inglés,
     se devuelve tal cual."""
-    if _idioma_relato(respuesta_id) == 'en':
+    # Por ahora solo se traduce el español; los relatos en otros idiomas
+    # (inglés, alemán, etc.) entran tal cual.
+    if not es_espanol(relato):
         return relato
     conn = get_conn()
     c = conn.cursor()
