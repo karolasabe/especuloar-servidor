@@ -257,11 +257,17 @@ document.documentElement.lang = IDIOMA;
 const SOBRE = {
   es: {
     boton: '(sobre las imágenes)', titulo: 'SOBRE LAS IMÁGENES',
+    inicio: {
+      original: 'Cada imagen se generó automáticamente a partir de un relato. El texto entra tal como fue escrito, en su idioma, al modelo Stable Diffusion 1.5, sin edición ni instrucciones adicionales, y nadie elige ni retoca el resultado.',
+      ingles: 'Cada imagen se generó automáticamente a partir de un relato. El texto se traduce al inglés de forma literal y entra así al modelo Stable Diffusion 1.5, sin edición ni instrucciones adicionales; nadie elige ni retoca el resultado.',
+    },
     parrafos: [
-      'Cada imagen se generó automáticamente a partir de un relato. El texto entra tal como fue escrito al modelo Stable Diffusion 1.5, sin edición ni instrucciones adicionales, y nadie elige ni retoca el resultado.',
       'Ese modelo aprendió a vincular palabras e imágenes a partir de pares de imagen y texto recopilados de internet: fotografías, ilustraciones, publicidad, noticias y foros, junto a las descripciones que personas escribieron para ellas. Fue entrenado sobre subconjuntos de LAION-2B(en), la porción en inglés de LAION-5B, un conjunto de unos 5.850 millones de pares de imagen y texto extraídos de Common Crawl y seleccionados en parte por un modelo que puntúa la calidad estética. Lo que aparece en cada imagen viene de esas asociaciones humanas acumuladas en internet.',
-      'El modelo lee los primeros 77 tokens de cada relato, unas 40 a 50 palabras en español, y fue entrenado sobre todo con descripciones en inglés.',
     ],
+    lectura: {
+      original: 'El modelo lee los primeros 77 tokens de cada relato, unas 40 a 50 palabras en español, y fue entrenado sobre todo con descripciones en inglés.',
+      ingles: 'El modelo fue entrenado sobre todo con descripciones en inglés; por eso recibe la traducción. Lee sus primeros 77 tokens, aproximadamente las primeras 50 palabras.',
+    },
     filtro: {
       desactivado: 'Las imágenes no pasan por filtros de contenido, con una excepción: se descarta toda imagen que muestre a una persona menor de edad desnuda o en un contexto sexual.',
       activo: 'El modelo aplica su propio filtro de contenido, que bloquea imágenes con desnudos o contenido sexual; cuando eso ocurre, se genera otra imagen. Además, se descarta toda imagen que muestre a una persona menor de edad desnuda o en un contexto sexual.',
@@ -269,11 +275,17 @@ const SOBRE = {
   },
   en: {
     boton: '(about the images)', titulo: 'ABOUT THE IMAGES',
+    inicio: {
+      original: 'Each image was generated automatically from a testimony. The text goes into the Stable Diffusion 1.5 model exactly as it was written, in its own language, with no editing or added instructions, and no one selects or retouches the result.',
+      ingles: 'Each image was generated automatically from a testimony. The text is translated literally into English and goes into the Stable Diffusion 1.5 model that way, with no editing or added instructions; no one selects or retouches the result.',
+    },
     parrafos: [
-      'Each image was generated automatically from a testimony. The text goes into the Stable Diffusion 1.5 model exactly as it was written, with no editing or added instructions, and no one selects or retouches the result.',
       'The model learned to link words and images from image and text pairs collected from the internet: photographs, illustrations, advertising, news and forums, together with the descriptions people wrote for them. It was trained on subsets of LAION-2B(en), the English portion of LAION-5B, a set of about 5.85 billion image and text pairs extracted from Common Crawl and partly selected by a model that scores aesthetic quality. What appears in each image comes from those human associations accumulated on the internet.',
-      'The model reads the first 77 tokens of each testimony, roughly 40 to 50 words in Spanish, and was trained mostly on English descriptions.',
     ],
+    lectura: {
+      original: 'The model reads the first 77 tokens of each testimony, roughly 40 to 50 words in Spanish, and was trained mostly on English descriptions.',
+      ingles: 'The model was trained mostly on English descriptions, which is why it receives the translation. It reads its first 77 tokens, roughly the first 50 words.',
+    },
     filtro: {
       desactivado: 'The images pass through no content filters, with one exception: any image showing a minor naked or in a sexual context is discarded.',
       activo: 'The model applies its own content filter, which blocks images with nudity or sexual content; when that happens, another image is generated. In addition, any image showing a minor naked or in a sexual context is discarded.',
@@ -281,6 +293,7 @@ const SOBRE = {
   },
 }[IDIOMA];
 let filtroModelo = 'activo';
+let idiomaModelo = 'original';
 
 function nombreCategoria(cat, idioma) {
   const info = CATEGORIAS[cat];
@@ -574,6 +587,7 @@ async function cargar(forzar) {
     datos = await res.json();
   } catch (e) { return; }
   if (datos.filtro_modelo === 'desactivado' || datos.filtro_modelo === 'activo') filtroModelo = datos.filtro_modelo;
+  if (typeof datos.traducir_al_ingles === 'boolean') idiomaModelo = datos.traducir_al_ingles ? 'ingles' : 'original';
   const lista = (datos.imagenes || []).slice().sort((a, b) => b.respuesta_id - a.respuesta_id);
   const seleccion = elegirFrases(lista);
   const firmaImagenes = lista.map(i => i.id + ':' + i.url).join('|');
@@ -780,7 +794,7 @@ document.getElementById('sobre-titulo').textContent = SOBRE.titulo;
 function pintarSobre() {
   const caja = document.getElementById('sobre-texto');
   caja.innerHTML = '';
-  for (const texto of [...SOBRE.parrafos, SOBRE.filtro[filtroModelo]]) {
+  for (const texto of [SOBRE.inicio[idiomaModelo], ...SOBRE.parrafos, SOBRE.lectura[idiomaModelo], SOBRE.filtro[filtroModelo]]) {
     const p = document.createElement('p');
     p.textContent = texto;
     caja.appendChild(p);

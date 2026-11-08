@@ -36,6 +36,16 @@
   .tarjeta .texto { display: none; margin-top: 10px; color: #1d1d1d; font-weight: 300; font-size: 12.5px; line-height: 1.6; white-space: pre-wrap; }
   .tarjeta.abierta .texto { display: block; }
   .tarjeta .texto .rotulo { color: var(--gris); font-weight: 400; display: block; margin-top: 8px; }
+  #comparacion { display: none; }
+  #comparacion .pedir { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: baseline; margin-bottom: 8px; }
+  #comparacion .pedir input { font: inherit; border: 0; border-bottom: 1px solid var(--tinta); background: none; width: 240px; padding: 4px 0; }
+  .par { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr); gap: 22px; padding: 26px 0; border-top: 1px solid var(--linea); }
+  .par .relato { font-weight: 300; font-size: 12.5px; line-height: 1.6; white-space: pre-wrap; color: #1d1d1d; }
+  .par .rotulo { color: var(--gris); display: block; margin-bottom: 6px; }
+  .par figure { margin: 0; }
+  .par .foto { width: 100%; aspect-ratio: 1 / 1; background: #ebe8e1; display: flex; align-items: center; justify-content: center; color: var(--gris); object-fit: cover; text-align: center; padding: 0; }
+  .par figcaption { margin-top: 8px; font-weight: 300; font-size: 12px; line-height: 1.55; color: #1d1d1d; white-space: pre-wrap; }
+  @media (max-width: 800px) { .par { grid-template-columns: 1fr 1fr; } .par .relato-col { grid-column: 1 / -1; } }
   #mensaje { position: fixed; bottom: 18px; left: var(--margen); color: var(--gris); }
   @media (max-width: 700px) { :root { --margen: 16px; } }
 </style>
@@ -68,6 +78,12 @@
       <p>Activada, cada imagen nueva espera aprobación aquí antes de aparecer en la galería, el monitor y la proyección.</p>
     </div>
     <div class="control">
+      <div class="titulo">Idioma que recibe el modelo</div>
+      <div class="valor" id="v-idioma">&nbsp;</div>
+      <button id="b-idioma" type="button"></button>
+      <p>Vale para las imágenes que se generen desde el cambio. Para aplicarlo a las que ya existen, hay que rehacerlas.</p>
+    </div>
+    <div class="control">
       <div class="titulo">Estado</div>
       <div class="valor" id="v-cuentas">&nbsp;</div>
       <p id="v-detalle"></p>
@@ -80,8 +96,19 @@
     <button type="button" data-vista="oculta">(ocultas)</button>
     <button type="button" data-vista="cola">(en cola o fallidas)</button>
     <button type="button" data-vista="todas">(todas)</button>
+    <button type="button" data-vista="comparacion">(comparación: su idioma / inglés)</button>
   </nav>
   <div id="grilla"></div>
+  <section id="comparacion">
+    <div class="pedir">
+      <label class="gris" for="c-relatos">Relatos (números separados por coma; vacío: 8 entre cortos y largos)</label>
+      <input id="c-relatos" type="text" inputmode="numeric" placeholder="346, 258, 301">
+      <button id="b-comparar" type="button">(generar comparación)</button>
+      <button id="b-borrar-comp" type="button">(borrar comparaciones)</button>
+    </div>
+    <p class="gris">Cada relato se genera dos veces con la misma semilla: en su idioma y traducido al inglés. Estas imágenes no se publican. Cada par cuesta dos imágenes en Replicate.</p>
+    <div id="pares"></div>
+  </section>
 </main>
 <div id="mensaje" role="status"></div>
 
@@ -139,7 +166,76 @@ async function actualizar() {
   } catch (e) { return; }
   pintarControles();
   pintarGrilla();
+  if (vista === 'comparacion') pintarComparaciones();
 }
+
+const urlsComp = new Map();
+async function pintarComparaciones() {
+  let filas;
+  try { filas = await (await pedir('/imagenes/comparaciones')).json(); } catch (e) { return; }
+  const porRelato = new Map();
+  for (const f of filas) {
+    if (!porRelato.has(f.respuesta_id)) porRelato.set(f.respuesta_id, {});
+    porRelato.get(f.respuesta_id)[f.variante] = f;
+  }
+  const caja = $('pares');
+  caja.innerHTML = '';
+  if (!porRelato.size) { caja.innerHTML = '<p class="gris">(todavía no hay comparaciones)</p>'; return; }
+  for (const [rid, par] of porRelato) {
+    const fila = document.createElement('article');
+    fila.className = 'par';
+    const col = document.createElement('div');
+    col.className = 'relato-col';
+    const r = document.createElement('span'); r.className = 'rotulo'; r.textContent = `relato ${rid}`;
+    const t = document.createElement('div'); t.className = 'relato';
+    t.textContent = (par.original || par.en || {}).relato || '';
+    col.append(r, t);
+    fila.append(col, figura(par.original, 'en su idioma', null), figura(par.en, 'traducido al inglés', (par.en || {}).prompt));
+    caja.appendChild(fila);
+  }
+}
+
+function figura(f, titulo, pie) {
+  const fig = document.createElement('figure');
+  const rot = document.createElement('span'); rot.className = 'rotulo'; rot.textContent = titulo;
+  fig.appendChild(rot);
+  let foto;
+  if (f && f.estado === 'lista') {
+    foto = document.createElement('img');
+    foto.className = 'foto'; foto.alt = titulo;
+    if (urlsComp.has(f.id)) foto.src = urlsComp.get(f.id);
+    else pedir(`/imagenes/comparacion/${f.id}`).then(r => r.ok ? r.blob() : null).then(b => {
+      if (!b) return;
+      const url = URL.createObjectURL(b); urlsComp.set(f.id, url); foto.src = url;
+    }).catch(() => {});
+  } else {
+    foto = document.createElement('div');
+    foto.className = 'foto';
+    foto.textContent = !f ? '' : f.estado === 'descartada' ? 'descartada por protección de menores'
+      : f.estado === 'fallida' ? (f.error || 'fallida') : 'generando...';
+  }
+  fig.appendChild(foto);
+  if (pie) { const c = document.createElement('figcaption'); c.textContent = pie; fig.appendChild(c); }
+  return fig;
+}
+
+$('b-comparar').addEventListener('click', async () => {
+  const lista = $('c-relatos').value.replace(/[^0-9,]/g, '');
+  const res = await pedir('/imagenes/comparar?' + (lista ? 'relatos=' + lista : 'n=8'), 'POST');
+  const d = await res.json().catch(() => ({}));
+  avisar(res.ok ? `Comparación en curso: relatos ${(d.relatos || []).join(', ')} (${d.imagenes} imágenes).` : 'No se pudo iniciar.');
+  pintarComparaciones();
+});
+$('b-borrar-comp').addEventListener('click', async () => {
+  await pedir('/imagenes/comparaciones/borrar', 'POST');
+  urlsComp.clear();
+  pintarComparaciones();
+});
+$('b-idioma').addEventListener('click', async () => {
+  await pedir(`/imagenes/idioma_modelo?ingles=${estado.traducir_al_ingles ? 0 : 1}`, 'POST');
+  avisar(estado.traducir_al_ingles ? 'El modelo recibirá cada relato en su idioma.' : 'El modelo recibirá cada relato traducido al inglés.');
+  actualizar();
+});
 
 function pintarControles() {
   const pausa = estado.en_pausa;
@@ -149,6 +245,9 @@ function pintarControles() {
   const previa = estado.moderacion_previa;
   $('v-previa').textContent = previa ? 'activada' : 'desactivada';
   $('b-previa').textContent = previa ? '(desactivar)' : '(activar)';
+  const ingles = estado.traducir_al_ingles;
+  $('v-idioma').textContent = ingles ? 'inglés (traducción literal)' : 'el idioma del relato';
+  $('b-idioma').textContent = ingles ? '(usar el idioma del relato)' : '(traducir al inglés)';
   const pe = estado.por_estado || {};
   const porRevisar = pe.por_revisar || 0;
   $('v-cuentas').textContent = `${pe.lista || 0} publicadas, ${porRevisar} por revisar`;
@@ -248,7 +347,13 @@ $('b-previa').addEventListener('click', async () => {
   actualizar();
 });
 for (const b of document.querySelectorAll('.vistas button')) {
-  b.addEventListener('click', () => { vista = b.dataset.vista; pintarControles(); pintarGrilla(); });
+  b.addEventListener('click', () => {
+    vista = b.dataset.vista;
+    $('grilla').style.display = vista === 'comparacion' ? 'none' : '';
+    $('comparacion').style.display = vista === 'comparacion' ? 'block' : 'none';
+    pintarControles();
+    if (vista === 'comparacion') pintarComparaciones(); else pintarGrilla();
+  });
 }
 
 if (token) {

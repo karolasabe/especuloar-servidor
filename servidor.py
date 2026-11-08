@@ -1689,6 +1689,20 @@ def init_db():
     # Rehacer una imagen sin sacarla de la galería: sigue a la vista hasta que
     # la nueva la reemplaza.
     c.execute('''ALTER TABLE imagenes ADD COLUMN IF NOT EXISTS rehacer BOOLEAN NOT NULL DEFAULT FALSE''')
+    # Prueba de idioma: el mismo relato en su idioma y traducido al inglés,
+    # con la misma semilla. No se publica; solo se ve en el panel.
+    c.execute('''CREATE TABLE IF NOT EXISTS comparaciones (
+        id SERIAL PRIMARY KEY,
+        respuesta_id INTEGER NOT NULL,
+        variante TEXT NOT NULL,
+        semilla BIGINT NOT NULL,
+        prompt TEXT,
+        estado TEXT NOT NULL DEFAULT 'pendiente',
+        datos BYTEA,
+        mime TEXT,
+        error TEXT,
+        creada TEXT,
+        generada TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS frases (
         respuesta_id INTEGER PRIMARY KEY,
         estado TEXT NOT NULL DEFAULT 'procesando',
@@ -2235,6 +2249,58 @@ _ETIQUETAS_PLANTILLA = [('metaforas', 'Visual metaphors'), ('afectos', 'Emotiona
                         ('materialidades', 'Materiality')]
 
 
+def _idioma_relato(respuesta_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('SELECT idioma FROM respuestas WHERE id = %s', (respuesta_id,))
+    fila = c.fetchone()
+    conn.close()
+    return (fila[0] if fila else None) or 'es'
+
+
+def traduccion_al_ingles(respuesta_id, relato):
+    """Traducción literal al inglés, guardada en la tabla de traducciones (la
+    misma que usa el botón de la galería). Si el relato ya está en inglés,
+    se devuelve tal cual."""
+    if _idioma_relato(respuesta_id) == 'en':
+        return relato
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT texto FROM traducciones WHERE respuesta_id = %s AND idioma_destino = 'en'",
+              (respuesta_id,))
+    fila = c.fetchone()
+    conn.close()
+    if fila:
+        return fila[0]
+    if len(relato) > TRADUCCION_MAX_CARACTERES:
+        relato = relato[:TRADUCCION_MAX_CARACTERES]
+    texto = traducir_texto(relato, 'en')
+    if not texto:
+        raise ErrorImagen('traducción al inglés no disponible; se reintenta')
+    _sumar_consumo('anthropic')
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('''INSERT INTO traducciones (respuesta_id, idioma_destino, texto, modelo, timestamp)
+        VALUES (%s, 'en', %s, %s, %s) ON CONFLICT (respuesta_id, idioma_destino) DO NOTHING''',
+        (respuesta_id, texto, TRADUCCION_MODELO, datetime.now().isoformat()))
+    conn.commit()
+    c.execute("SELECT texto FROM traducciones WHERE respuesta_id = %s AND idioma_destino = 'en'",
+              (respuesta_id,))
+    texto = c.fetchone()[0]
+    conn.close()
+    return texto
+
+
+def _traducir_para_modelo():
+    """En el modo relato, el panel decide si el modelo recibe el relato en su
+    idioma o traducido al inglés."""
+    conn = get_conn()
+    try:
+        return _leer_config(conn.cursor(), 'traducir_al_ingles') == '1'
+    finally:
+        conn.close()
+
+
 def prompt_plantilla(conceptos):
     """La plantilla de la tesis: 'Visual metaphors: ... Emotional register: ...
     Materiality: ... <estilo>'. Sin el eje de deseos de la tesis. Los ejes vacíos se omiten."""
@@ -2633,7 +2699,10 @@ def procesar_imagen(trabajo):
             conn.close()
             return 'sin_relato'
         if IMAGEN_MODO_PROMPT == 'relato':
-            prompt = ' '.join((fila[0] or '').split())[:IMAGEN_RELATO_MAX_CARACTERES]
+            texto = fila[0] or ''
+            if _traducir_para_modelo():
+                texto = traduccion_al_ingles(respuesta_id, texto)
+            prompt = ' '.join(texto.split())[:IMAGEN_RELATO_MAX_CARACTERES]
             if not prompt:
                 raise ErrorImagen('relato vacío')
             _actualizar_imagen(imagen_id, prompt=prompt, conceptos=None, modelo_texto=None)
@@ -2971,6 +3040,7 @@ def listar_imagenes():
         'pendientes': conteo.get('pendiente', 0),
         'generando': conteo.get('generando', 0),
         'filtro_modelo': estado_filtro_modelo(),
+        'traducir_al_ingles': _traducir_para_modelo(),
     })
 
 
@@ -3047,6 +3117,7 @@ def estado_imagenes():
     replicate_hoy = _consumo_hoy(c, SERVICIO_REPLICATE)
     menores_hoy = _consumo_hoy(c, 'menores_descartadas')
     previa = _moderacion_previa(c)
+    al_ingles = _leer_config(c, 'traducir_al_ingles') == '1'
     anthropic_hoy = _consumo_hoy(c, 'anthropic')
     latido = _leer_config(c, 'imagenes_latido')
     c.execute("SELECT estado, COUNT(*) FROM frases GROUP BY estado")
@@ -3068,6 +3139,7 @@ def estado_imagenes():
         'latido_hace_s': latido_hace,
         'en_pausa': pausa,
         'moderacion_previa': previa,
+        'traducir_al_ingles': al_ingles,
         'descartadas_proteccion_menores_hoy': menores_hoy,
         'detenido_por': bloqueo,
         'token_replicate': formato_token_replicate(),
@@ -3186,6 +3258,160 @@ def rehacer_todas():
     conn.close()
     _evento_imagenes.set()
     return jsonify({'status': 'ok', 'por_rehacer': n})
+
+
+_candado_comparacion = threading.Lock()
+
+
+def _procesar_comparaciones():
+    """Genera, de a una, las imágenes de comparación pendientes."""
+    if not _candado_comparacion.acquire(blocking=False):
+        return
+    try:
+        while True:
+            conn = get_conn()
+            c = conn.cursor()
+            if _bloqueo_vigente(c) or _consumo_hoy(c, SERVICIO_REPLICATE) >= IMAGEN_MAX_DIA:
+                conn.close()
+                return
+            c.execute('''UPDATE comparaciones SET estado = 'generando'
+                WHERE id = (SELECT id FROM comparaciones WHERE estado = 'pendiente'
+                            ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED)
+                RETURNING id, respuesta_id, variante, semilla''')
+            trabajo = c.fetchone()
+            conn.commit()
+            conn.close()
+            if not trabajo:
+                return
+            cid, rid, variante, semilla = trabajo
+            campos = {}
+            try:
+                conn = get_conn()
+                c = conn.cursor()
+                c.execute('SELECT relato FROM respuestas WHERE id = %s', (rid,))
+                fila = c.fetchone()
+                conn.close()
+                texto = (fila[0] if fila else '') or ''
+                if variante == 'en':
+                    texto = traduccion_al_ingles(rid, texto)
+                prompt = ' '.join(texto.split())[:IMAGEN_RELATO_MAX_CARACTERES]
+                campos['prompt'] = prompt
+                resultado = generar_en_replicate(prompt, semilla)
+                if revisar_menores(resultado['datos'], resultado['mime']):
+                    _sumar_consumo('menores_descartadas')
+                    campos.update(estado='descartada', error='protección de menores')
+                else:
+                    campos.update(estado='lista', datos=psycopg2.Binary(resultado['datos']),
+                                  mime=resultado['mime'], generada=_ahora().isoformat())
+            except ErrorCuenta as e:
+                _bloquear(str(e), e.espera, e.servicio)
+                campos.update(estado='pendiente', error=str(e)[:500])
+            except ErrorImagen as e:
+                campos.update(estado='fallida', error=str(e)[:500])
+            conn = get_conn()
+            c = conn.cursor()
+            asignaciones = ', '.join(f'{k} = %s' for k in campos)
+            c.execute(f'UPDATE comparaciones SET {asignaciones} WHERE id = %s',
+                      list(campos.values()) + [cid])
+            conn.commit()
+            conn.close()
+            if campos.get('estado') == 'pendiente':
+                return
+    finally:
+        _candado_comparacion.release()
+
+
+@app.route('/imagenes/comparar', methods=['POST'])
+@requiere_admin
+def comparar_idiomas():
+    """Encola la prueba de idioma. ?relatos=12,40,77 o, si no se indican,
+    ?n=8 relatos en español repartidos entre cortos y largos."""
+    conn = get_conn()
+    c = conn.cursor()
+    pedidos = [x for x in (request.args.get('relatos') or '').replace(' ', '').split(',') if x.isdigit()]
+    if pedidos:
+        rids = [int(x) for x in pedidos][:20]
+        c.execute('SELECT id FROM respuestas WHERE id = ANY(%s)', (rids,))
+        rids = [r[0] for r in c.fetchall()]
+    else:
+        n = max(1, min(int(request.args.get('n') or 8), 20))
+        c.execute('''SELECT r.id FROM respuestas r JOIN imagenes i ON i.respuesta_id = r.id
+            WHERE COALESCE(r.idioma, 'es') <> 'en' AND i.estado IN ('lista', 'por_revisar')
+            ORDER BY length(r.relato), r.id''')
+        todos = [r[0] for r in c.fetchall()]
+        rids = [todos[round(k * (len(todos) - 1) / max(1, n - 1))] for k in range(min(n, len(todos)))]
+        rids = list(dict.fromkeys(rids))
+    ahora = _ahora().isoformat()
+    for rid in rids:
+        semilla = secrets.randbelow(2 ** 31)
+        for variante in ('original', 'en'):
+            c.execute('''INSERT INTO comparaciones (respuesta_id, variante, semilla, creada)
+                VALUES (%s, %s, %s, %s)''', (rid, variante, semilla, ahora))
+    conn.commit()
+    conn.close()
+    threading.Thread(target=_procesar_comparaciones, daemon=True).start()
+    return jsonify({'status': 'ok', 'relatos': rids, 'imagenes': 2 * len(rids)})
+
+
+@app.route('/imagenes/comparaciones', methods=['GET'])
+@requiere_admin
+def listar_comparaciones():
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('''SELECT k.id, k.respuesta_id, k.variante, k.semilla, k.prompt, k.estado, k.error,
+            k.creada, r.relato, t.texto
+        FROM comparaciones k
+        LEFT JOIN respuestas r ON r.id = k.respuesta_id
+        LEFT JOIN traducciones t ON t.respuesta_id = k.respuesta_id AND t.idioma_destino = 'en'
+        ORDER BY k.creada DESC, k.respuesta_id, k.variante DESC''')
+    columnas = ['id', 'respuesta_id', 'variante', 'semilla', 'prompt', 'estado', 'error',
+                'creada', 'relato', 'traduccion']
+    filas = [dict(zip(columnas, f)) for f in c.fetchall()]
+    conn.close()
+    if any(f['estado'] == 'pendiente' for f in filas):
+        threading.Thread(target=_procesar_comparaciones, daemon=True).start()
+    return jsonify(filas)
+
+
+@app.route('/imagenes/comparacion/<int:cid>', methods=['GET'])
+@requiere_admin
+def imagen_comparacion(cid):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('SELECT datos, mime FROM comparaciones WHERE id = %s', (cid,))
+    fila = c.fetchone()
+    conn.close()
+    if not fila or fila[0] is None:
+        return jsonify({'error': 'no encontrada'}), 404
+    respuesta = app.response_class(bytes(fila[0]), mimetype=fila[1] or 'image/jpeg')
+    respuesta.headers['Cache-Control'] = 'private, no-store'
+    return respuesta
+
+
+@app.route('/imagenes/comparaciones/borrar', methods=['POST'])
+@requiere_admin
+def borrar_comparaciones():
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("DELETE FROM comparaciones WHERE estado <> 'generando'")
+    n = c.rowcount
+    conn.commit()
+    conn.close()
+    return jsonify({'status': 'ok', 'borradas': n})
+
+
+@app.route('/imagenes/idioma_modelo', methods=['POST'])
+@requiere_admin
+def cambiar_idioma_modelo():
+    """?ingles=1: cada relato se traduce al inglés antes del modelo.
+    ?ingles=0: el modelo recibe el relato en su idioma."""
+    ingles = request.args.get('ingles') == '1'
+    conn = get_conn()
+    c = conn.cursor()
+    _escribir_config(c, 'traducir_al_ingles', '1' if ingles else '0')
+    conn.commit()
+    conn.close()
+    return jsonify({'status': 'ok', 'traducir_al_ingles': ingles})
 
 
 @app.route('/imagenes/pausar', methods=['POST'])
