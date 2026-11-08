@@ -95,9 +95,20 @@ IMAGEN_PARAMETROS = {
     'scheduler': 'DPMSolverMultistep',
     'num_outputs': 1,
 }
-IMAGEN_NEGATIVE_PROMPT = os.environ.get(
-    'IMAGEN_NEGATIVE_PROMPT',
-    'text, watermark, signature, blurry, low quality, ugly, deformed, cartoon, anime')
+# Solo se excluyen letras y marcas de agua. Términos como ugly, deformed o low
+# quality empujaban al modelo hacia imágenes pulidas y fuera de la crudeza de
+# los relatos.
+IMAGEN_NEGATIVE_PROMPT = os.environ.get('IMAGEN_NEGATIVE_PROMPT', 'text, watermark, signature')
+# Cómo se arma el prompt:
+#   'plantilla' (la de la tesis, especuloar_prompts.xlsx): los conceptos entran
+#     con las palabras de quien escribe, en español, ordenados por eje, más una
+#     línea de estilo. Ninguna capa intermedia los reescribe.
+#   'redactado': Claude redacta un prompt en inglés a partir de los conceptos.
+IMAGEN_MODO_PROMPT = os.environ.get('IMAGEN_MODO_PROMPT', 'plantilla')
+IMAGEN_ESTILO = os.environ.get(
+    'IMAGEN_ESTILO',
+    'Hyperrealistic sculpture, studio photography, neutral background, cinematic light, 8k')
+IMAGEN_CONCEPTOS_POR_EJE = int(os.environ.get('IMAGEN_CONCEPTOS_POR_EJE', '4'))
 # Tope diario de llamadas a Replicate: protege el presupuesto si llegan
 # envíos masivos mientras nadie mira.
 IMAGEN_MAX_DIA = int(os.environ.get('IMAGEN_MAX_DIA', '300'))
@@ -1650,6 +1661,9 @@ def init_db():
         ON imagenes (estado)''')
     # Frases cortas de cada relato, elegidas por Claude y comprobadas como
     # textuales, para la galería.
+    # Rehacer una imagen sin sacarla de la galería: sigue a la vista hasta que
+    # la nueva la reemplaza.
+    c.execute('''ALTER TABLE imagenes ADD COLUMN IF NOT EXISTS rehacer BOOLEAN NOT NULL DEFAULT FALSE''')
     c.execute('''CREATE TABLE IF NOT EXISTS frases (
         respuesta_id INTEGER PRIMARY KEY,
         estado TEXT NOT NULL DEFAULT 'procesando',
@@ -1947,10 +1961,11 @@ def _firma_tally_valida(cuerpo_bruto, firma):
 # ============================================================
 # IMÁGENES
 # ============================================================
-# Cadena por relato (método del notebook especuloar_pipeline):
-#   1. Extracción de conceptos en cuatro ejes (afectos, materialidades,
-#      metáforas, deseos), una llamada por eje con la instrucción original.
-#   2. Prompt en inglés para Stable Diffusion a partir de esos conceptos.
+# Cadena por relato:
+#   1. Extracción de conceptos en tres ejes (afectos, materialidades,
+#      metáforas), una llamada por eje, con las palabras de quien escribe.
+#   2. Prompt con la plantilla de la tesis (o redactado por Claude, si
+#      IMAGEN_MODO_PROMPT=redactado).
 #   3. Imagen con Stable Diffusion 1.5 en Replicate, parámetros de la tesis.
 # Cada paso se guarda apenas termina: si falla el siguiente, el reintento
 # no repite los anteriores. La imagen se descarga de inmediato, porque
@@ -1966,10 +1981,16 @@ _EJES_IMAGEN = {
     'metaforas': 'Extrae las metáforas visuales, comparaciones e imágenes no literales de '
                  'este relato. Las más potentes visualmente. Devuelve SOLO un JSON con la '
                  'clave "conceptos" y una lista de strings. Sin explicaciones.',
-    'deseos': 'Extrae los deseos especulativos y reimaginaciones del objeto y espacio de '
-              'este relato. Devuelve SOLO un JSON con la clave "conceptos" y una lista de '
-              'strings. Sin explicaciones.',
+    # Sin eje de deseos: la encuesta pide describir una experiencia, no cómo
+    # debería ser el instrumento.
 }
+
+# Se agrega a cada eje: la extracción conserva las palabras y las imágenes del
+# relato tal como vienen, incluidas las más duras.
+_EXTRACCION_LITERAL = (
+    ' Hasta {n} conceptos breves, con las palabras de quien escribe y en su idioma. Conserva las '
+    'imágenes más duras tal como aparecen (violencia, carne, frío, castigo, animalidad, '
+    'lo que sea): no las suavices, no las traduzcas a eufemismos ni las interpretes.')
 
 _PROMPT_IMAGEN = (
     'Eres un especialista en prompt engineering para Stable Diffusion.\n'
@@ -1977,7 +1998,6 @@ _PROMPT_IMAGEN = (
     'Metáforas: {metaforas}\n'
     'Afectos: {afectos}\n'
     'Materialidades: {materialidades}\n'
-    'Deseos: {deseos}\n'
     'Genera UN prompt en inglés para Stable Diffusion, evocador y sensorialmente denso.\n'
     'Solo el prompt, sin explicaciones. Máximo {max_palabras} palabras.'
 )
@@ -2166,11 +2186,13 @@ def _json_de_respuesta(texto):
 
 
 def extraer_conceptos(relato):
-    """Cuatro llamadas, una por eje, con la instrucción del notebook."""
+    """Tres llamadas, una por eje, con la instrucción del notebook."""
     relato = relato[:TRADUCCION_MAX_CARACTERES]
     conceptos = {}
     for eje, instruccion in _EJES_IMAGEN.items():
-        texto = _claude(_SISTEMA_IMAGEN, f'{instruccion}\n\nRelato:\n<relato>\n{relato}\n</relato>',
+        literal = _EXTRACCION_LITERAL.format(n=IMAGEN_CONCEPTOS_POR_EJE)
+        texto = _claude(_SISTEMA_IMAGEN,
+                        f'{instruccion}{literal}\n\nRelato:\n<relato>\n{relato}\n</relato>',
                         max_tokens=800)
         try:
             lista = _json_de_respuesta(texto).get('conceptos', [])
@@ -2180,11 +2202,33 @@ def extraer_conceptos(relato):
             raise ErrorImagen(f'conceptos ({eje}): formato inesperado')
         conceptos[eje] = [str(x).strip() for x in lista if str(x).strip()][:20]
     if not any(conceptos.values()):
-        raise ErrorImagen('conceptos: los cuatro ejes vinieron vacíos')
+        raise ErrorImagen('conceptos: los ejes vinieron vacíos')
     return conceptos
 
 
+_ETIQUETAS_PLANTILLA = [('metaforas', 'Visual metaphors'), ('afectos', 'Emotional register'),
+                        ('materialidades', 'Materiality')]
+
+
+def prompt_plantilla(conceptos):
+    """La plantilla de la tesis: 'Visual metaphors: ... Emotional register: ...
+    Materiality: ... <estilo>'. Sin el eje de deseos de la tesis. Los ejes vacíos se omiten."""
+    partes = []
+    for eje, etiqueta in _ETIQUETAS_PLANTILLA:
+        lista = [' '.join(str(x).split()).strip(' .') for x in conceptos.get(eje, [])]
+        lista = [x for x in lista if x][:IMAGEN_CONCEPTOS_POR_EJE]
+        if lista:
+            partes.append(f"{etiqueta}: {', '.join(lista)}.")
+    if not partes:
+        raise ErrorImagen('prompt vacío: sin conceptos')
+    if IMAGEN_ESTILO.strip():
+        partes.append(IMAGEN_ESTILO.strip())
+    return ' '.join(partes)
+
+
 def generar_prompt(conceptos):
+    if IMAGEN_MODO_PROMPT != 'redactado':
+        return prompt_plantilla(conceptos)
     instruccion = _PROMPT_IMAGEN.format(
         max_palabras=IMAGEN_PROMPT_MAX_PALABRAS,
         **{eje: json.dumps(conceptos.get(eje, []), ensure_ascii=False) for eje in _EJES_IMAGEN})
@@ -2467,6 +2511,17 @@ def reclamar_imagen():
                 LIMIT 1 FOR UPDATE SKIP LOCKED)
             RETURNING id, respuesta_id, conceptos, prompt, intentos''', (ahora, ahora))
         fila = c.fetchone()
+        if fila is None:
+            c.execute('''UPDATE imagenes SET rehacer = FALSE, inicio = %s, intentos = intentos + 1
+                WHERE id = (
+                    SELECT id FROM imagenes
+                    WHERE estado = 'lista' AND rehacer
+                      AND (proximo_intento IS NULL OR proximo_intento <= %s)
+                    ORDER BY respuesta_id DESC
+                    LIMIT 1 FOR UPDATE SKIP LOCKED)
+                RETURNING id, respuesta_id, conceptos, prompt, intentos''', (ahora, ahora))
+            otra = c.fetchone()
+            fila = tuple(otra) + (True,) if otra else None
         conn.commit()
         return fila
     finally:
@@ -2499,7 +2554,8 @@ def _actualizar_imagen(imagen_id, **campos):
 
 
 def procesar_imagen(trabajo):
-    imagen_id, respuesta_id, conceptos_json, prompt, intentos = trabajo
+    imagen_id, respuesta_id, conceptos_json, prompt, intentos = trabajo[:5]
+    rehaciendo = len(trabajo) > 5 and trabajo[5]
     try:
         conn = get_conn()
         c = conn.cursor()
@@ -2537,15 +2593,30 @@ def procesar_imagen(trabajo):
         # y toda la generación espera.
         log.warning('imagenes: cola detenida %s s: %s', e.espera, e)
         conn = get_conn()
-        conn.cursor().execute('''UPDATE imagenes SET estado = 'pendiente', error = %s,
-            intentos = GREATEST(intentos - 1, 0) WHERE id = %s''', (str(e)[:500], imagen_id))
+        if rehaciendo:
+            conn.cursor().execute('''UPDATE imagenes SET rehacer = TRUE, error = %s,
+                intentos = GREATEST(intentos - 1, 0) WHERE id = %s''', (str(e)[:500], imagen_id))
+        else:
+            conn.cursor().execute('''UPDATE imagenes SET estado = 'pendiente', error = %s,
+                intentos = GREATEST(intentos - 1, 0) WHERE id = %s''', (str(e)[:500], imagen_id))
         conn.commit()
         conn.close()
         _bloquear(str(e), e.espera, e.servicio)
         return 'bloqueo'
     except ErrorImagen as e:
         log.warning('imagenes: relato %s, intento %s: %s', respuesta_id, intentos, e)
-        _registrar_fallo(imagen_id, intentos, str(e))
+        if rehaciendo:
+            # La imagen anterior sigue a la vista; se reintenta más tarde o se deja.
+            otra_vez = intentos < IMAGEN_MAX_INTENTOS
+            proximo = datetime.fromtimestamp(
+                _ahora().timestamp() + min(60 * (2 ** intentos), 3600)).isoformat()
+            conn = get_conn()
+            conn.cursor().execute('''UPDATE imagenes SET rehacer = %s, error = %s, proximo_intento = %s
+                WHERE id = %s''', (otra_vez, str(e)[:500], proximo if otra_vez else None, imagen_id))
+            conn.commit()
+            conn.close()
+        else:
+            _registrar_fallo(imagen_id, intentos, str(e))
         return 'fallo'
 
 # ---------- frases cortas para la galería ----------
@@ -2894,6 +2965,8 @@ def estado_imagenes():
     latido = _leer_config(c, 'imagenes_latido')
     c.execute("SELECT estado, COUNT(*) FROM frases GROUP BY estado")
     frases_conteo = dict(c.fetchall())
+    c.execute("SELECT COUNT(*) FROM imagenes WHERE estado = 'lista' AND rehacer")
+    por_rehacer = c.fetchone()[0]
     # Último error registrado (mensajes propios del servidor: códigos HTTP y
     # explicaciones; no incluyen claves ni texto de los relatos).
     c.execute('''SELECT respuesta_id, error, inicio FROM imagenes
@@ -2915,6 +2988,8 @@ def estado_imagenes():
         'tope_diario': IMAGEN_MAX_DIA,
         'llamadas_claude_hoy': anthropic_hoy,
         'frases_por_estado': frases_conteo,
+        'por_rehacer': por_rehacer,
+        'modo_prompt': IMAGEN_MODO_PROMPT,
         'ultimo_error': ({'relato': fila_error[0], 'error': fila_error[1], 'cuando': fila_error[2]}
                          if fila_error else None),
         'modelo_imagen': IMAGEN_MODELO_REPLICATE,
@@ -2984,6 +3059,23 @@ def regenerar_imagen(respuesta_id):
         f'''UPDATE imagenes SET estado = 'pendiente', intentos = 0, error = NULL,
             proximo_intento = NULL{extra}
             WHERE estado <> 'generando' AND respuesta_id = %s''')
+
+
+@app.route('/imagenes/rehacer_todas', methods=['POST'])
+@requiere_admin
+def rehacer_todas():
+    """Rehace las imágenes ya hechas con la forma actual de armar el prompt
+    (conceptos y prompt nuevos). Cada una sigue en la galería hasta que la
+    nueva está lista; los relatos sin imagen tienen prioridad."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('''UPDATE imagenes SET rehacer = TRUE, conceptos = NULL, prompt = NULL,
+        intentos = 0, proximo_intento = NULL, error = NULL WHERE estado = 'lista' ''')
+    n = c.rowcount
+    conn.commit()
+    conn.close()
+    _evento_imagenes.set()
+    return jsonify({'status': 'ok', 'por_rehacer': n})
 
 
 @app.route('/imagenes/pausar', methods=['POST'])
