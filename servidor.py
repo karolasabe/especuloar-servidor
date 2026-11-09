@@ -3650,6 +3650,45 @@ def imagen_comparacion(cid):
     return respuesta
 
 
+@app.route('/imagenes/comparacion/<int:cid>/usar', methods=['POST'])
+@requiere_admin
+def usar_comparacion(cid):
+    """Publica en la galería una imagen de comparación: reemplaza la imagen
+    del relato y lo saca de la cola de rehacer, para que no se pierda."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("""SELECT respuesta_id, variante, semilla, prompt, datos, mime FROM comparaciones
+        WHERE id = %s AND estado = 'lista' AND datos IS NOT NULL""", (cid,))
+    fila = c.fetchone()
+    if not fila:
+        conn.close()
+        return jsonify({'status': 'error', 'mensaje': 'comparación sin imagen'}), 404
+    rid, variante, semilla, prompt, datos, mime = fila
+    c.execute("SELECT estado FROM imagenes WHERE respuesta_id = %s", (rid,))
+    actual = c.fetchone()
+    if actual and actual[0] == 'generando':
+        conn.close()
+        return jsonify({'status': 'error',
+                        'mensaje': 'el relato se está generando; intenta en un momento'}), 409
+    ahora = _ahora().isoformat()
+    c.execute("""INSERT INTO imagenes (respuesta_id, estado, prompt, negative_prompt, modelo_imagen,
+            semilla, mime, datos, creada, generada, intentos, rehacer, error, nota, bloqueos_filtro)
+        VALUES (%s, 'lista', %s, %s, %s, %s, %s, %s, %s, %s, 0, FALSE, NULL, NULL, 0)
+        ON CONFLICT (respuesta_id) DO UPDATE SET estado = 'lista', prompt = EXCLUDED.prompt,
+            negative_prompt = EXCLUDED.negative_prompt, modelo_imagen = EXCLUDED.modelo_imagen,
+            semilla = EXCLUDED.semilla, mime = EXCLUDED.mime, datos = EXCLUDED.datos,
+            generada = EXCLUDED.generada, intentos = 0, rehacer = FALSE, error = NULL,
+            nota = NULL, bloqueos_filtro = 0, proximo_intento = NULL, conceptos = NULL""",
+              (rid, prompt, IMAGEN_NEGATIVE_SIN_TEXTO or None, IMAGEN_MODELO_REPLICATE, semilla,
+               mime, psycopg2.Binary(bytes(datos)), ahora, ahora))
+    conn.commit()
+    conn.close()
+    _registrar_evento(rid, 'panel', 'desde_comparacion', variante, semilla, prompt,
+                      'imagen de una comparación publicada desde el panel')
+    _evento_imagenes.set()
+    return jsonify({'status': 'ok', 'relato': rid})
+
+
 @app.route('/imagenes/comparaciones/borrar', methods=['POST'])
 @requiere_admin
 def borrar_comparaciones():

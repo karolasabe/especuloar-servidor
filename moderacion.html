@@ -231,6 +231,19 @@ function figura(f, titulo, pie) {
     const n = document.createElement('figcaption'); n.className = 'gris'; n.textContent = '(' + f.error + ')'; fig.appendChild(n);
   }
   if (pie) { const c = document.createElement('figcaption'); c.textContent = pie; fig.appendChild(c); }
+  if (f && f.estado === 'lista') {
+    const usar = document.createElement('button');
+    usar.type = 'button'; usar.textContent = '(usar en la galería)';
+    usar.style.cssText = 'display:block;margin-top:8px';
+    usar.addEventListener('click', async () => {
+      if (!confirm(`¿Publicar esta imagen como la del relato ${f.respuesta_id}? Reemplaza la que tiene ahora.`)) return;
+      const res = await pedir(`/imagenes/comparacion/${f.id}/usar`, 'POST');
+      const d = await res.json().catch(() => ({}));
+      avisar(res.ok ? `Relato ${f.respuesta_id}: imagen publicada en la galería.` : (d.mensaje || 'No se pudo publicar.'));
+      if (res.ok) usar.textContent = '(publicada)';
+    });
+    fig.appendChild(usar);
+  }
   return fig;
 }
 
