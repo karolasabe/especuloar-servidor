@@ -36,6 +36,9 @@ ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
 ANTHROPIC_API_URL = os.environ.get('ANTHROPIC_API_URL', 'https://api.anthropic.com/v1/messages')
 # Modelo configurable desde Render sin tocar el código.
 TRADUCCION_MODELO = os.environ.get('TRADUCCION_MODELO', 'claude-haiku-5-5')
+# Descripción de la experiencia (modo en prueba): un modelo de lenguaje lee el
+# relato y describe en inglés la sensación, los materiales, el espacio y la luz.
+EXPERIENCIA_MODELO = os.environ.get('EXPERIENCIA_MODELO', 'claude-sonnet-5-5')
 # Nivel de esfuerzo (output_config.effort). 'low' reduce el razonamiento
 # interno, que en Haiku 5.5 se cobra como tokens de salida. Se omite en
 # modelos anteriores a la generación 5, que no lo usan.
@@ -1671,6 +1674,11 @@ def init_db():
         valor TEXT
     )''')
     # Caché de traducciones: una fila por relato e idioma de destino.
+    c.execute('''CREATE TABLE IF NOT EXISTS descripciones_experiencia (
+        respuesta_id INTEGER PRIMARY KEY,
+        texto TEXT NOT NULL,
+        modelo TEXT,
+        timestamp TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS traducciones (
         id SERIAL PRIMARY KEY,
         respuesta_id INTEGER NOT NULL,
@@ -2344,6 +2352,44 @@ def traduccion_al_ingles(respuesta_id, relato):
     conn.commit()
     c.execute("SELECT texto FROM traducciones WHERE respuesta_id = %s AND idioma_destino = 'en'",
               (respuesta_id,))
+    texto = c.fetchone()[0]
+    conn.close()
+    return texto
+
+
+_PROMPT_EXPERIENCIA = (
+    'Lee el relato y escribe, en inglés y en no más de 50 palabras, una descripción visual de la '
+    'experiencia que relata. Prioriza, en este orden: la sensación y el ánimo; los materiales, '
+    'texturas, temperaturas y objetos que el relato nombra; el espacio y la luz. Usa solo lo que el '
+    'relato dice o implica directamente. Si el relato usa metáforas o comparaciones, consérvalas; no '
+    'agregues otras. No describas a la persona que relata: ni edad, ni apariencia, ni ropa. Si nombra '
+    'partes del cuerpo, inclúyelas como fragmentos. No suavices ni omitas lo violento o lo doloroso.\n'
+    'Responde solo con la descripción, en una línea, sin comillas, sin títulos ni comentarios.')
+
+
+def descripcion_experiencia(respuesta_id, relato):
+    """Descripción en inglés de la experiencia del relato, hecha una vez por
+    relato y guardada (tabla descripciones_experiencia)."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('SELECT texto FROM descripciones_experiencia WHERE respuesta_id = %s', (respuesta_id,))
+    fila = c.fetchone()
+    conn.close()
+    if fila:
+        return fila[0]
+    relato = (relato or '')[:TRADUCCION_MAX_CARACTERES]
+    texto = _claude(_PROMPT_EXPERIENCIA, '<relato>\n' + relato + '\n</relato>',
+                    max_tokens=1024, modelo=EXPERIENCIA_MODELO)
+    texto = ' '.join(texto.replace('"', ' ').split())
+    if not texto:
+        raise ErrorImagen('descripción de la experiencia vacía; se reintenta')
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('''INSERT INTO descripciones_experiencia (respuesta_id, texto, modelo, timestamp)
+        VALUES (%s, %s, %s, %s) ON CONFLICT (respuesta_id) DO NOTHING''',
+        (respuesta_id, texto, EXPERIENCIA_MODELO, datetime.now().isoformat()))
+    conn.commit()
+    c.execute('SELECT texto FROM descripciones_experiencia WHERE respuesta_id = %s', (respuesta_id,))
     texto = c.fetchone()[0]
     conn.close()
     return texto
@@ -3459,6 +3505,12 @@ def _procesar_comparaciones():
                 texto = (fila[0] if fila else '') or ''
                 if variante == 'en':
                     texto = traduccion_al_ingles(rid, texto)
+                elif variante == 'actual':
+                    # como entra hoy a la galería
+                    if _traducir_para_modelo():
+                        texto = traduccion_al_ingles(rid, texto)
+                elif variante == 'exp':
+                    texto = descripcion_experiencia(rid, texto)
                 prompt = ' '.join(texto.split())[:IMAGEN_RELATO_MAX_CARACTERES]
                 campos['prompt'] = prompt
                 resultado = generar_en_replicate(prompt, semilla)
@@ -3525,10 +3577,11 @@ def comparar_idiomas():
         todos = [r[0] for r in c.fetchall()]
         rids = [todos[round(k * (len(todos) - 1) / max(1, n - 1))] for k in range(min(n, len(todos)))]
         rids = list(dict.fromkeys(rids))
+    variantes = ('actual', 'exp') if request.args.get('tipo') == 'experiencia' else ('original', 'en')
     ahora = _ahora().isoformat()
     for rid in rids:
         semilla = secrets.randbelow(2 ** 31)
-        for variante in ('original', 'en'):
+        for variante in variantes:
             c.execute('''INSERT INTO comparaciones (respuesta_id, variante, semilla, creada)
                 VALUES (%s, %s, %s, %s)''', (rid, variante, semilla, ahora))
     conn.commit()

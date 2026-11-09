@@ -97,17 +97,18 @@
     <button type="button" data-vista="oculta">(ocultas)</button>
     <button type="button" data-vista="cola">(en cola o fallidas)</button>
     <button type="button" data-vista="todas">(todas)</button>
-    <button type="button" data-vista="comparacion">(comparación: su idioma / inglés)</button>
+    <button type="button" data-vista="comparacion">(comparaciones)</button>
   </nav>
   <div id="grilla"></div>
   <section id="comparacion">
     <div class="pedir">
       <label class="gris" for="c-relatos">Relatos (números separados por coma; vacío: 8 entre cortos y largos)</label>
       <input id="c-relatos" type="text" inputmode="numeric" placeholder="346, 258, 301">
-      <button id="b-comparar" type="button">(generar comparación)</button>
+      <button id="b-comparar" type="button">(comparar su idioma / inglés)</button>
+      <button id="b-comparar-exp" type="button">(comparar relato / experiencia)</button>
       <button id="b-borrar-comp" type="button">(borrar comparaciones)</button>
     </div>
-    <p class="gris">Cada relato se genera dos veces con la misma semilla: en su idioma y traducido al inglés. Estas imágenes no se publican. Cada par cuesta dos imágenes en Replicate.</p>
+    <p class="gris">Cada relato se genera dos veces con la misma semilla. Idioma: en su idioma y traducido al inglés. Experiencia: el relato como entra hoy a la galería, y una descripción en inglés de la sensación, los materiales, el espacio y la luz que escribe un modelo de lenguaje a partir del relato. Estas imágenes no se publican. Cada par cuesta dos imágenes en Replicate.</p>
     <div id="pares"></div>
   </section>
 </main>
@@ -177,22 +178,30 @@ async function pintarComparaciones() {
   try { filas = await (await pedir('/imagenes/comparaciones')).json(); } catch (e) { return; }
   const porRelato = new Map();
   for (const f of filas) {
-    if (!porRelato.has(f.respuesta_id)) porRelato.set(f.respuesta_id, {});
-    porRelato.get(f.respuesta_id)[f.variante] = f;
+    const tipo = (f.variante === 'actual' || f.variante === 'exp') ? 'experiencia' : 'idioma';
+    const clave = f.respuesta_id + '|' + tipo;
+    if (!porRelato.has(clave)) porRelato.set(clave, { rid: f.respuesta_id, tipo });
+    porRelato.get(clave)[f.variante] = f;
   }
   const caja = $('pares');
   caja.innerHTML = '';
   if (!porRelato.size) { caja.innerHTML = '<p class="gris">(todavía no hay comparaciones)</p>'; return; }
-  for (const [rid, par] of porRelato) {
+  for (const par of porRelato.values()) {
+    const rid = par.rid;
     const fila = document.createElement('article');
     fila.className = 'par';
     const col = document.createElement('div');
     col.className = 'relato-col';
-    const r = document.createElement('span'); r.className = 'rotulo'; r.textContent = `relato ${rid}`;
+    const r = document.createElement('span'); r.className = 'rotulo';
+    r.textContent = `relato ${rid}` + (par.tipo === 'experiencia' ? ' - experiencia' : ' - idioma');
     const t = document.createElement('div'); t.className = 'relato';
-    t.textContent = (par.original || par.en || {}).relato || '';
+    t.textContent = (par.original || par.en || par.actual || par.exp || {}).relato || '';
     col.append(r, t);
-    fila.append(col, figura(par.original, 'en su idioma', null), figura(par.en, 'traducido al inglés', (par.en || {}).prompt));
+    if (par.tipo === 'experiencia') {
+      fila.append(col, figura(par.actual, 'el relato (como hoy)', null), figura(par.exp, 'descripción de la experiencia', (par.exp || {}).prompt));
+    } else {
+      fila.append(col, figura(par.original, 'en su idioma', null), figura(par.en, 'traducido al inglés', (par.en || {}).prompt));
+    }
     caja.appendChild(fila);
   }
 }
@@ -225,13 +234,15 @@ function figura(f, titulo, pie) {
   return fig;
 }
 
-$('b-comparar').addEventListener('click', async () => {
+async function comparar(tipo) {
   const lista = $('c-relatos').value.replace(/[^0-9,]/g, '');
-  const res = await pedir('/imagenes/comparar?' + (lista ? 'relatos=' + lista : 'n=8'), 'POST');
+  const res = await pedir(`/imagenes/comparar?tipo=${tipo}&` + (lista ? 'relatos=' + lista : 'n=8'), 'POST');
   const d = await res.json().catch(() => ({}));
   avisar(res.ok ? `Comparación en curso: relatos ${(d.relatos || []).join(', ')} (${d.imagenes} imágenes).` : 'No se pudo iniciar.');
   pintarComparaciones();
-});
+}
+$('b-comparar').addEventListener('click', () => comparar('idioma'));
+$('b-comparar-exp').addEventListener('click', () => comparar('experiencia'));
 $('b-borrar-comp').addEventListener('click', async () => {
   await pedir('/imagenes/comparaciones/borrar', 'POST');
   urlsComp.clear();
