@@ -2655,6 +2655,7 @@ if (MODO_PROYECCION) {
 // Encuadre en sala (porcentaje de la imagen, ajustable en la dirección):
 //   &izq=3  &der=0  &sup=0  &inf=12   márgenes para que nada caiga fuera del muro
 //   &lateral=0.3                       velocidad del desplazamiento con dos dedos a los lados
+//   &vista=0.5                          escala de la vista inicial y de reposo
 //   &alejar=0.25  &acercar=8           rango de zoom (alejar: fracción de la vista inicial;
 //                                      acercar: aumento máximo)
 //   &ocultar=placer_deseo              categorías que no se proyectan (separadas por coma;
@@ -2751,7 +2752,16 @@ if (MODO_SALA) {
     lado.appendChild(controlesEl);
   }
 
-  const escalaBase = () => (H > W * 1.2 ? 0.58 : 1.15);
+  // Vista por defecto en sala: la misma de cuando la nebulosa recién carga
+  // (escala 0,5), sin el acercamiento automático posterior. &vista=0.7 la acerca.
+  const _vistaParam = parseFloat(new URLSearchParams(window.location.search).get('vista'));
+  const SALA_VISTA = Number.isFinite(_vistaParam) && _vistaParam > 0 ? _vistaParam : 0.5;
+  const escalaBase = () => (H > W * 1.2 ? SALA_VISTA * 0.5 : SALA_VISTA);
+  ajustarCamaraInicial = function () {
+    cam.tx = 0; cam.ty = 0; cam.tscale = escalaBase();
+    cam.x = 0; cam.y = 0; cam.scale = cam.tscale;
+  };
+  cam.tscale = cam.scale = escalaBase();
   let ultimaInteraccion = performance.now();
 
   // Sin menú contextual ni gesto de navegación atrás/adelante
