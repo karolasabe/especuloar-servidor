@@ -2655,6 +2655,8 @@ if (MODO_PROYECCION) {
 // Encuadre en sala (porcentaje de la imagen, ajustable en la dirección):
 //   &izq=3  &der=0  &sup=0  &inf=12   márgenes para que nada caiga fuera del muro
 //   &lateral=0.3                       velocidad del desplazamiento con dos dedos a los lados
+//   &alejar=0.25  &acercar=8           rango de zoom (alejar: fracción de la vista inicial;
+//                                      acercar: aumento máximo)
 //   &ocultar=placer_deseo              categorías que no se proyectan (separadas por coma;
 //                                      &ocultar=ninguna las muestra todas)
 //   - Dos dedos arriba/abajo: acercar o alejar hacia donde apunta el cursor.
@@ -2674,6 +2676,8 @@ if (MODO_SALA) {
   const _ps = new URLSearchParams(window.location.search);
   const _num = (k, def) => { const v = parseFloat(_ps.get(k)); return Number.isFinite(v) ? v : def; };
   const SALA_LATERAL_K = _num('lateral', 0.3);  // dos dedos a los lados (1 = velocidad anterior)
+  const SALA_ALEJAR = Math.max(0.05, _num('alejar', 0.25)); // hasta 4 veces más lejos que la vista inicial
+  const SALA_ACERCAR = Math.max(1, _num('acercar', 8));      // aumento máximo
 
   // Encuadre: márgenes para el muro de la sala y controles arriba a la derecha,
   // bajo el contador de voces.
@@ -2697,6 +2701,20 @@ if (MODO_SALA) {
       transform-origin: top right;
     }
     body.sala .zoom-hint { bottom: calc(3.35rem + var(--m-inf)); }
+    /* botones legibles sobre la nebulosa: disco oscuro y anillo fino */
+    body.sala .leyenda-toggle,
+    body.sala .audio-toggle {
+      background: rgba(4,4,6,0.74);
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.42), 0 0 16px 4px rgba(0,0,0,0.55);
+      transition: box-shadow 0.25s ease;
+    }
+    body.sala .leyenda-toggle:hover,
+    body.sala .audio-toggle:hover,
+    body.sala.leyenda-abierta .leyenda-toggle,
+    body.sala.audio-activo .audio-toggle {
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.75), 0 0 16px 4px rgba(0,0,0,0.55);
+    }
+    body.sala .contador { text-shadow: 0 0 10px rgba(0,0,0,0.85), 0 0 3px rgba(0,0,0,0.9); }
   `;
   document.head.appendChild(estiloEncuadre);
   document.body.classList.add('sala');
@@ -2784,8 +2802,8 @@ if (MODO_SALA) {
     if (e.ctrlKey || e.metaKey || Math.abs(dy) >= Math.abs(dx)) {
       const d = Math.max(-SALA_DELTA_MAX, Math.min(SALA_DELTA_MAX, dy));
       const factor = Math.exp(-d * SALA_ZOOM_K);
-      const minimo = escalaBase() * 0.75;
-      const nueva = Math.max(minimo, Math.min(cam.MAX_SCALE, cam.tscale * factor));
+      const minimo = Math.max(cam.MIN_SCALE, escalaBase() * SALA_ALEJAR);
+      const nueva = Math.max(minimo, Math.min(SALA_ACERCAR, cam.tscale * factor));
       const wx = (sx - W / 2) / cam.tscale + cam.tx;
       const wy = (sy - H / 2) / cam.tscale + cam.ty;
       cam.tscale = nueva;
