@@ -2655,6 +2655,8 @@ if (MODO_PROYECCION) {
 // Encuadre en sala (porcentaje de la imagen, ajustable en la dirección):
 //   &izq=3  &der=0  &sup=0  &inf=12   márgenes para que nada caiga fuera del muro
 //   &lateral=0.3                       velocidad del desplazamiento con dos dedos a los lados
+//   &ocultar=placer_deseo              categorías que no se proyectan (separadas por coma;
+//                                      &ocultar=ninguna las muestra todas)
 //   - Dos dedos arriba/abajo: acercar o alejar hacia donde apunta el cursor.
 //   - Dos dedos a los lados: desplazar la vista.
 //   - Al alejar, la vista vuelve de a poco al centro.
@@ -2698,6 +2700,29 @@ if (MODO_SALA) {
   `;
   document.head.appendChild(estiloEncuadre);
   document.body.classList.add('sala');
+  // Categorías ocultas en la proyección: sus manchas no entran a la galaxia,
+  // no aparecen en la leyenda ni en las etiquetas del relato abierto.
+  const _ocultarParam = _ps.get('ocultar');
+  const OCULTAS = new Set(
+    (_ocultarParam === null ? 'placer_deseo' : _ocultarParam)
+      .split(',').map(t => t.trim()).filter(t => t && t !== 'ninguna'));
+  if (OCULTAS.size) {
+    const _push = pintitas.push.bind(pintitas);
+    pintitas.push = (...nuevas) => _push(...nuevas.filter(p => !OCULTAS.has(p.categoria)));
+    for (let i = pintitas.length - 1; i >= 0; i--) if (OCULTAS.has(pintitas[i].categoria)) pintitas.splice(i, 1);
+    const _flash = dispararFlash;
+    dispararFlash = function (p, ...resto) { if (p && OCULTAS.has(p.categoria)) return; return _flash(p, ...resto); };
+    const _chips = pintarChipsModal;
+    pintarChipsModal = function () {
+      _categoriasModal = (_categoriasModal || []).filter(c => !OCULTAS.has(c));
+      return _chips();
+    };
+    const estiloOcultas = document.createElement('style');
+    estiloOcultas.textContent = [...OCULTAS]
+      .map(c => `.leyenda-item[data-cat="${c}"] { display: none !important; }`).join('\n');
+    document.head.appendChild(estiloOcultas);
+  }
+
   const contadorEl = document.querySelector('.contador');
   const controlesEl = document.querySelector('.controles-obra');
   if (contadorEl && controlesEl) {
