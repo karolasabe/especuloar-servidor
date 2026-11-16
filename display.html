@@ -2652,6 +2652,9 @@ if (MODO_PROYECCION) {
 // Activar con: display.html?modo=sala
 // Combinable: display.html?modo=sala&idioma=en
 // Sin el parámetro, la galaxia web queda igual que antes.
+// Encuadre en sala (porcentaje de la imagen, ajustable en la dirección):
+//   &izq=3  &der=0  &sup=0  &inf=12   márgenes para que nada caiga fuera del muro
+//   &lateral=0.3                       velocidad del desplazamiento con dos dedos a los lados
 //   - Dos dedos arriba/abajo: acercar o alejar hacia donde apunta el cursor.
 //   - Dos dedos a los lados: desplazar la vista.
 //   - Al alejar, la vista vuelve de a poco al centro.
@@ -2666,6 +2669,44 @@ if (MODO_SALA) {
   const SALA_RETORNO_CENTRO = 0.06;     // cuánto se recentra en cada paso al alejar
   const SALA_INACTIVIDAD_MS = 60000;    // 1 min sin uso: vuelve a la vista inicial
   const SALA_CIERRE_RELATO_MS = 180000; // 3 min sin uso: cierra el relato abierto
+  const _ps = new URLSearchParams(window.location.search);
+  const _num = (k, def) => { const v = parseFloat(_ps.get(k)); return Number.isFinite(v) ? v : def; };
+  const SALA_LATERAL_K = _num('lateral', 0.3);  // dos dedos a los lados (1 = velocidad anterior)
+
+  // Encuadre: márgenes para el muro de la sala y controles arriba a la derecha,
+  // bajo el contador de voces.
+  document.documentElement.style.setProperty('--m-izq', _num('izq', 3) + 'vw');
+  document.documentElement.style.setProperty('--m-der', _num('der', 0) + 'vw');
+  document.documentElement.style.setProperty('--m-sup', _num('sup', 0) + 'vh');
+  document.documentElement.style.setProperty('--m-inf', _num('inf', 12) + 'vh');
+  const estiloEncuadre = document.createElement('style');
+  estiloEncuadre.textContent = `
+    body.sala #overlay {
+      padding: calc(1.8rem + var(--m-sup)) calc(1.8rem + var(--m-der))
+               calc(1.8rem + var(--m-inf)) calc(1.8rem + var(--m-izq));
+    }
+    body.sala .lado-derecho { display: flex; flex-direction: column; align-items: flex-end; gap: 1.1rem; }
+    body.sala .lado-derecho .controles-obra { flex-direction: row; }
+    body.sala .leyenda {
+      position: fixed; left: auto; bottom: auto;
+      right: calc(1.8rem + var(--m-der));
+      top: calc(1.8rem + var(--m-sup) + 140px);
+      max-width: min(46vw, 560px);
+      transform-origin: top right;
+    }
+    body.sala .zoom-hint { bottom: calc(3.35rem + var(--m-inf)); }
+  `;
+  document.head.appendChild(estiloEncuadre);
+  document.body.classList.add('sala');
+  const contadorEl = document.querySelector('.contador');
+  const controlesEl = document.querySelector('.controles-obra');
+  if (contadorEl && controlesEl) {
+    const lado = document.createElement('div');
+    lado.className = 'lado-derecho';
+    contadorEl.parentNode.insertBefore(lado, contadorEl);
+    lado.appendChild(contadorEl);
+    lado.appendChild(controlesEl);
+  }
 
   const escalaBase = () => (H > W * 1.2 ? 0.58 : 1.15);
   let ultimaInteraccion = performance.now();
@@ -2730,7 +2771,8 @@ if (MODO_SALA) {
         cam.ty *= (1 - SALA_RETORNO_CENTRO);
       }
     } else {
-      cam.tx += dx / cam.scale;
+      const d = Math.max(-SALA_DELTA_MAX, Math.min(SALA_DELTA_MAX, dx));
+      cam.tx += d * SALA_LATERAL_K / cam.scale;
     }
 
     // Que nadie se pierda fuera de la galaxia
